@@ -52,9 +52,9 @@ class AvalonSimulator:
             elif self.game_state.round_stage == RoundStage.TEAM_VOTE:
                 self._team_vote_step()
             elif self.game_state.round_stage == RoundStage.QUEST_VOTE:
-                self.quest_vote_step()
+                self._quest_vote_step()
         elif self.game_state.game_stage == GameStage.MERLIN_VOTE:
-            self.merlin_vote_step()
+            self._merlin_vote_step()
             
     def _team_proposal_step(self) -> None:
         leader = self.players[self.game_state.leader_index]
@@ -65,14 +65,14 @@ class AvalonSimulator:
         team_votes = [player.get_team_vote(self.game_state) for player in self.players]
         self.game_state.vote_on_team(team_votes)
         
-    def quest_vote_step(self) -> None:
+    def _quest_vote_step(self) -> None:
         quest_team = self.game_state.quest_teams[self.game_state.quest_num]
         quest_votes = [
             self.players[i].get_quest_vote(self.game_state) for i in quest_team
         ]
         self.game_state.vote_on_quest(quest_votes)
     
-    def merlin_vote_step(self) -> None:
+    def _merlin_vote_step(self) -> None:
         merlin_guesses = [
             player.guess_merlin(self.game_state) for player in self.players if player.role == Role.SPY
         ]
