@@ -217,6 +217,205 @@ class AvalonGameState:
         else:
             self.game_stage = GameStage.RESISTANCE_WIN
             
+    ################
+    # Observations #
+    ################
+    
+    def player_role_one_hot_obs(self, player_index: int) -> np.ndarray:
+        """
+        Returns a one hot encoding of the player's role as a numpy 1D array of shape (Role.one_hot_dim(),).
+        """
+        return self.player_assignments[player_index].as_one_hot().astype(self.np_type)
+    
+    def all_player_roles_obs(self, from_perspective_of_player_index: Optional[int] = None) -> np.ndarray:
+        """
+        Returns the one hot encoding of the player's roles as a numpy 2D array with 
+        shape (n_players, Role.one_hot_dim()). 
+        
+        from_perspective_of_player_index: If provided, the roles of players that are
+        hidden to the current player are masked out to 0.
+        """
+        
+        # Observation contains the one hot encoding of each player's role
+        player_obs = np.stack([
+            self.player_role_one_hot_obs(i) for i in range(self.n_players)
+        ], axis=0)
+        
+        # Mask out roles of players that the current player cannot see
+        if from_perspective_of_player_index is not None:
+            for i in range(self.n_players):
+                if from_perspective_of_player_index == i: # player can see their own role
+                    continue
+                curr_role = self.player_assignments[from_perspective_of_player_index]
+                other_role = self.player_assignments[i]
+                if other_role not in ROLES_CAN_SEE[curr_role]:
+                    player_obs[i] = np.zeros_like(player_obs[i])
+                    
+        return player_obs
+                
+    def game_state_obs(self, from_perspective_of_player_index: Optional[int] = None) -> np.ndarray:
+        """
+        Returns the entire history of the game as a numpy array with 
+        shape (n_players, max_rounds, 7 + Role.one_hot_dim()).
+        
+        from_perspective_of_player_index: If provided, the information in the game state
+        that the current player cannot see is masked out to 0.
+        """
+        
+        game_history = self.game_history_np # (n_players, max_rounds, 7)
+        
+        player_roles = self.all_player_roles_obs(from_perspective_of_player_index) # (n_players, Role.one_hot_dim())
+        player_roles_expanded = np.repeat(player_roles[:, np.newaxis, :], self.max_rounds, axis=1) # (n_players, max_rounds, Role.one_hot_dim())
+        
+        return np.concatenate([
+            game_history,
+            player_roles_expanded
+        ], axis=2) # (n_players, max_rounds, 7 + Role.one_hot_dim())
+    
+    #########################
+    # Game History As Numpy #
+    #########################
+    
+    @property
+    def np_type(self) -> np.dtype:
+        """Get the numpy data type of the observations."""
+        return np.float32
+    
+    @property
+    def max_rounds(self) -> int:
+        """Get the maximum number of rounds in the game."""
+        return 25
+    
+    @property
+    def turns_until_hammer_np(self) -> np.ndarray:
+        """
+        Get the number of turns until hammer as a numpy array with shape (max_rounds,). 
+        Values are in range [0, 1] where
+        - 0 means the turn hasnt happened yet
+        - 1 means the turn is the hammer turn
+        - fractional values count down to the hammer turn
+        """
+        
+        turns = self.turns_until_hammer.copy() + [5] * (self.max_rounds - len(self.turns_until_hammer))
+        turns = np.array(turns, dtype=self.np_type)
+        turns = (5-turns)/5.0
+        return turns
+    
+    @property
+    def who_was_leader_np(self) -> np.ndarray:
+        """
+        Get the leader in each round as a numpy array with shape (max_rounds, n_players). 
+        1 = leader, fractional = counts down to leader.
+        """
+        
+        leader_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
+        for i in range(self.round_num+1):
+            for j in range(self.n_players):
+                val = 1-(j/self.n_players)
+                player_index = (i+j) % self.n_players
+                leader_np[player_index, i] = val
+        return leader_np
+    
+    @property
+    def teams_np(self) -> np.ndarray:
+        """
+        Get the teams proposed in each round as a numpy array with shape (n_players, max_rounds). 
+        0 = not in team, 1 = in team.
+        """
+        
+        teams_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
+        for i, team in enumerate(self.teams):
+            teams_np[team, i] = 1
+        return teams_np
+    
+    @property
+    def team_votes_np(self) -> np.ndarray:
+        """
+        Get the votes on the teams proposed in each round as a numpy array with shape
+        (n_players, max_rounds). 0 = reject, 1 = approve.
+        """
+        
+        team_votes_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
+        for i, team_votes in enumerate(self.team_votes):
+            for j, vote in enumerate(team_votes):
+                team_votes_np[j, i] = 1 if vote == TeamVote.APPROVE else 0
+        return team_votes_np
+    
+    @property
+    def team_vote_results_np(self) -> np.ndarray:
+        """
+        Get the results of the team votes in each round as a numpy array with shape (max_rounds,).
+        0 = rejected, 1 = approved.
+        """
+        
+        team_vote_results_np = np.zeros(self.max_rounds, dtype=self.np_type)
+        for i, result in enumerate(self.team_vote_results):
+            team_vote_results_np[i] = 1 if result == TeamVoteResult.APPROVED else 0
+        return team_vote_results_np
+    
+    @property
+    def quest_votes_np(self) -> np.ndarray:
+        """
+        Get the votes on the teams proposed for each quest as a numpy array with shape (max_rounds). 
+        value=0.5*num_fails.
+        """
+        
+        quest_votes_np = np.zeros((self.max_rounds,), dtype=self.np_type)
+        quest_counter = 0
+        for i, result in enumerate(self.team_vote_results):
+            if quest_counter == len(self.quest_votes):
+                break
+            if result == TeamVoteResult.APPROVED:
+                num_fails = self.quest_votes[quest_counter].count(QuestVote.FAIL)
+                quest_votes_np[i] = 0.5*num_fails
+                quest_counter += 1
+        return quest_votes_np
+    
+    @property
+    def quest_results_np(self) -> np.ndarray:
+        """
+        Get the results of the quests as a numpy array with shape (max_rounds,). 
+        1 = failed, 0 = succeeded.
+        """
+        
+        quest_results_np = np.zeros(self.max_rounds, dtype=self.np_type)
+        quest_counter = 0
+        for i, result in enumerate(self.team_vote_results):
+            if quest_counter == len(self.quest_results):
+                break
+            if result == TeamVoteResult.APPROVED:
+                quest_results_np[i] = 1 if self.quest_results[quest_counter] == QuestResult.FAILED else 0
+                quest_counter += 1
+        return quest_results_np
+    
+    @property
+    def game_history_np(self) -> np.ndarray:
+        """
+        Returns the entire history of the game as a numpy array with shape (n_players, max_rounds, 7).
+        """
+        
+        one_dim_obs = np.stack([
+            self.turns_until_hammer_np,
+            self.team_vote_results_np,
+            self.quest_votes_np,
+            self.quest_results_np,
+        ], axis=1)
+        two_dim_obs = np.stack([
+            self.who_was_leader_np,
+            self.teams_np,
+            self.team_votes_np,
+        ], axis=2)
+        one_dim_copied = np.repeat(one_dim_obs[np.newaxis, :, :], self.n_players, axis=0)
+        
+        return np.concatenate([
+            two_dim_obs,
+            one_dim_copied
+        ], axis=2)
+    
+    ###########
+    # Helpers #
+    ###########
+            
     def _check_start_of_round_invariant(self,):
         """
         Raises if the start of the round invariant is violated.
@@ -257,162 +456,6 @@ class AvalonGameState:
         assert self.game_stage == other.game_stage
         assert self.round_stage == other.round_stage
     
-    ######################
-    # Numpy Observations #
-    ######################
-    
-    @property
-    def np_type(self) -> np.dtype:
-        """Get the numpy data type of the observations."""
-        return np.float32
-    
-    @property
-    def max_rounds(self) -> int:
-        """Get the maximum number of rounds in the game."""
-        return 25
-    
-    @property
-    def turns_until_hammer_np(self) -> np.ndarray:
-        """
-        Get the number of turns until hammer as a numpy array with shape (max_rounds,). Values are in range
-        [0, 1] where
-        - 0 means the turn hasnt happened yet
-        - 1 means the turn is the hammer turn
-        - fractional values count down to the hammer turn
-        """
-        
-        turns = self.turns_until_hammer.copy() + [5] * (self.max_rounds - len(self.turns_until_hammer))
-        turns = np.array(turns, dtype=self.np_type)
-        turns = (5-turns)/5.0
-        return turns
-    
-    @property
-    def who_was_leader_np(self) -> np.ndarray:
-        """
-        Get the leader in each round as a numpy array with shape (max_rounds, n_players). 1 = leader, fractional = counts down to leader.
-        """
-        
-        leader_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
-        for i in range(self.round_num+1):
-            for j in range(self.n_players):
-                val = 1-(j/self.n_players)
-                player_index = (i+j) % self.n_players
-                leader_np[player_index, i] = val
-        return leader_np
-    
-    @property
-    def teams_np(self) -> np.ndarray:
-        """
-        Get the teams proposed in each round as a numpy array with shape (n_players, max_rounds). 0 = not in team, 1 = in team.
-        """
-        
-        teams_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
-        for i, team in enumerate(self.teams):
-            teams_np[team, i] = 1
-        return teams_np
-    
-    @property
-    def team_votes_np(self) -> np.ndarray:
-        """
-        Get the votes on the teams proposed in each round as a numpy array with shape (n_players, max_rounds). 0 = reject, 1 = approve.
-        """
-        
-        team_votes_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
-        for i, team_votes in enumerate(self.team_votes):
-            for j, vote in enumerate(team_votes):
-                team_votes_np[j, i] = 1 if vote == TeamVote.APPROVE else 0
-        return team_votes_np
-    
-    @property
-    def team_vote_results_np(self) -> np.ndarray:
-        """
-        Get the results of the team votes in each round as a numpy array with shape (max_rounds,). 0 = rejected, 1 = approved.
-        """
-        
-        team_vote_results_np = np.zeros(self.max_rounds, dtype=self.np_type)
-        for i, result in enumerate(self.team_vote_results):
-            team_vote_results_np[i] = 1 if result == TeamVoteResult.APPROVED else 0
-        return team_vote_results_np
-    
-    @property
-    def quest_votes_np(self) -> np.ndarray:
-        """
-        Get the votes on the teams proposed for each quest as a numpy array with shape (max_rounds). value=0.5*num_fails.
-        """
-        
-        quest_votes_np = np.zeros((self.max_rounds,), dtype=self.np_type)
-        quest_counter = 0
-        for i, result in enumerate(self.team_vote_results):
-            if result == TeamVoteResult.APPROVED:
-                num_fails = self.quest_votes[quest_counter].count(QuestVote.FAIL)
-                quest_votes_np[i] = 0.5*num_fails
-                quest_counter += 1
-        return quest_votes_np
-    
-    @property
-    def quest_results_np(self) -> np.ndarray:
-        """
-        Get the results of the quests as a numpy array with shape (max_rounds,). 1 = failed, 0 = succeeded.
-        """
-        
-        quest_results_np = np.zeros(self.max_rounds, dtype=self.np_type)
-        quest_counter = 0
-        for i, result in enumerate(self.team_vote_results):
-            if result == TeamVoteResult.APPROVED:
-                quest_results_np[i] = 1 if self.quest_results[quest_counter] == QuestResult.FAILED else 0
-                quest_counter += 1
-        return quest_results_np
-    
-    @property
-    def history_obs_np(self) -> np.ndarray:
-        """
-        Returns the entire history of the game as a numpy array with shape (n_players, max_rounds, 7).
-        """
-        
-        one_dim_obs = np.stack([
-            self.turns_until_hammer_np,
-            self.team_vote_results_np,
-            self.quest_votes_np,
-            self.quest_results_np,
-        ], axis=1)
-        two_dim_obs = np.stack([
-            self.who_was_leader_np,
-            self.teams_np,
-            self.team_votes_np,
-        ], axis=2)
-        one_dim_copied = np.repeat(one_dim_obs[np.newaxis, :, :], self.n_players, axis=0)
-        
-        return np.concatenate([
-            two_dim_obs,
-            one_dim_copied
-        ], axis=2)
-            
-    def player_role_obs_np(self, index: int) -> np.ndarray:
-        """
-        Returns a one hot encoding of the player's role as a numpy 1D array of shape (Role.one_hot_dim(),).
-        """
-        return self.player_assignments[index].as_one_hot().astype(self.np_type)
-    
-    def player_roles_obs_np(self, from_perspective: Optional[int] = None) -> np.ndarray:
-        """
-        Returns the one hot encoding of the player's roles as a numpy 2D array with shape (n_players, Role.one_hot_dim()). If from_perspective is provided, the roles that the player cannot see are set to zero.
-        """
-        
-        player_obs = np.stack([
-            self.player_role_obs_np(i) for i in range(self.n_players)
-        ], axis=0)
-        
-        if from_perspective is not None:
-            for i in range(self.n_players):
-                if from_perspective == i: # player can see their own role
-                    continue
-                curr_role = self.player_assignments[from_perspective]
-                other_role = self.player_assignments[i]
-                if other_role not in ROLES_CAN_SEE[curr_role]:
-                    player_obs[i] = np.zeros_like(player_obs[i])
-                    
-        return player_obs
-                
     ###################
     # To Load BC Data #
     ###################
