@@ -17,13 +17,18 @@ class AvalonSimulator:
         self,
         roles: List[Role],
         player_factory: Callable[[Role], AvalonPlayer],
+        randomize_player_assignments: bool = True, 
         verbose: bool = False,
     ) -> None:
         """
         roles: List of roles for the players in the game
         player_factory: Function that takes a Role and returns an AvalonPlayer
         """
-        self.game_state = AvalonGameState(roles, verbose=verbose)
+        self.game_state = AvalonGameState(
+            roles,
+            randomize_player_assignments=randomize_player_assignments, 
+            verbose=verbose
+        )
         player_assignment = self.game_state.player_assignments
         self.players: List[AvalonPlayer] = [player_factory(role, i) for i, role in enumerate(player_assignment)]
         

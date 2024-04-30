@@ -2,3 +2,5 @@ numpy
 torch
 matplotlib
 gym
+tqdm
+torch-summary

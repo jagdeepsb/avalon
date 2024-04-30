@@ -1,8 +1,10 @@
-from typing import List, Tuple
+from __future__ import annotations
+from typing import List, Tuple, Dict, Optional
 import random
+import numpy as np
 from src.utils import (
     Role, TeamVote, TeamVoteResult, QuestVote,
-    QuestResult, RoundStage, GameStage,
+    QuestResult, RoundStage, GameStage, ROLES_CAN_SEE,
     TEAM_SIZE_BY_N_PLAYERS_AND_QUEST_NUM
 )
 
@@ -231,4 +233,371 @@ class AvalonGameState:
         assert self.quest_num == len(self.quest_teams) == len(self.quest_votes) == len(self.quest_results), (
             f"There is a mismatch {self.quest_num} {len(self.quest_teams)} {len(self.quest_votes)} {len(self.quest_results)}"
         )
+    
+    def assert_equals(self, other: AvalonGameState) -> bool:
+        """
+        Asserts that this game state is equal to another game state.
+        """
         
+        assert self. player_assignments == other.player_assignments
+        assert self.round_num == other.round_num
+        assert self.quest_num == other.quest_num
+        assert self.leader_index == other.leader_index
+        
+        assert self.turns_until_hammer == other.turns_until_hammer
+        assert self.teams == other.teams
+        assert self.team_votes == other.team_votes
+        assert self.team_vote_results == other.team_vote_results
+        
+        assert self.quest_teams == other.quest_teams
+        assert self.quest_votes == other.quest_votes
+        assert self.quest_results == other.quest_results
+        
+        assert self.merlin_guess_player_idx == other.merlin_guess_player_idx
+        assert self.game_stage == other.game_stage
+        assert self.round_stage == other.round_stage
+    
+    ######################
+    # Numpy Observations #
+    ######################
+    
+    @property
+    def np_type(self) -> np.dtype:
+        """Get the numpy data type of the observations."""
+        return np.float32
+    
+    @property
+    def max_rounds(self) -> int:
+        """Get the maximum number of rounds in the game."""
+        return 25
+    
+    @property
+    def turns_until_hammer_np(self) -> np.ndarray:
+        """
+        Get the number of turns until hammer as a numpy array with shape (max_rounds,). Values are in range
+        [0, 1] where
+        - 0 means the turn hasnt happened yet
+        - 1 means the turn is the hammer turn
+        - fractional values count down to the hammer turn
+        """
+        
+        turns = self.turns_until_hammer.copy() + [5] * (self.max_rounds - len(self.turns_until_hammer))
+        turns = np.array(turns, dtype=self.np_type)
+        turns = (5-turns)/5.0
+        return turns
+    
+    @property
+    def who_was_leader_np(self) -> np.ndarray:
+        """
+        Get the leader in each round as a numpy array with shape (max_rounds, n_players). 1 = leader, fractional = counts down to leader.
+        """
+        
+        leader_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
+        for i in range(self.round_num+1):
+            for j in range(self.n_players):
+                val = 1-(j/self.n_players)
+                player_index = (i+j) % self.n_players
+                leader_np[player_index, i] = val
+        return leader_np
+    
+    @property
+    def teams_np(self) -> np.ndarray:
+        """
+        Get the teams proposed in each round as a numpy array with shape (n_players, max_rounds). 0 = not in team, 1 = in team.
+        """
+        
+        teams_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
+        for i, team in enumerate(self.teams):
+            teams_np[team, i] = 1
+        return teams_np
+    
+    @property
+    def team_votes_np(self) -> np.ndarray:
+        """
+        Get the votes on the teams proposed in each round as a numpy array with shape (n_players, max_rounds). 0 = reject, 1 = approve.
+        """
+        
+        team_votes_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
+        for i, team_votes in enumerate(self.team_votes):
+            for j, vote in enumerate(team_votes):
+                team_votes_np[j, i] = 1 if vote == TeamVote.APPROVE else 0
+        return team_votes_np
+    
+    @property
+    def team_vote_results_np(self) -> np.ndarray:
+        """
+        Get the results of the team votes in each round as a numpy array with shape (max_rounds,). 0 = rejected, 1 = approved.
+        """
+        
+        team_vote_results_np = np.zeros(self.max_rounds, dtype=self.np_type)
+        for i, result in enumerate(self.team_vote_results):
+            team_vote_results_np[i] = 1 if result == TeamVoteResult.APPROVED else 0
+        return team_vote_results_np
+    
+    @property
+    def quest_votes_np(self) -> np.ndarray:
+        """
+        Get the votes on the teams proposed for each quest as a numpy array with shape (max_rounds). value=0.5*num_fails.
+        """
+        
+        quest_votes_np = np.zeros((self.max_rounds,), dtype=self.np_type)
+        quest_counter = 0
+        for i, result in enumerate(self.team_vote_results):
+            if result == TeamVoteResult.APPROVED:
+                num_fails = self.quest_votes[quest_counter].count(QuestVote.FAIL)
+                quest_votes_np[i] = 0.5*num_fails
+                quest_counter += 1
+        return quest_votes_np
+    
+    @property
+    def quest_results_np(self) -> np.ndarray:
+        """
+        Get the results of the quests as a numpy array with shape (max_rounds,). 1 = failed, 0 = succeeded.
+        """
+        
+        quest_results_np = np.zeros(self.max_rounds, dtype=self.np_type)
+        quest_counter = 0
+        for i, result in enumerate(self.team_vote_results):
+            if result == TeamVoteResult.APPROVED:
+                quest_results_np[i] = 1 if self.quest_results[quest_counter] == QuestResult.FAILED else 0
+                quest_counter += 1
+        return quest_results_np
+    
+    @property
+    def history_obs_np(self) -> np.ndarray:
+        """
+        Returns the entire history of the game as a numpy array with shape (n_players, max_rounds, 7).
+        """
+        
+        one_dim_obs = np.stack([
+            self.turns_until_hammer_np,
+            self.team_vote_results_np,
+            self.quest_votes_np,
+            self.quest_results_np,
+        ], axis=1)
+        two_dim_obs = np.stack([
+            self.who_was_leader_np,
+            self.teams_np,
+            self.team_votes_np,
+        ], axis=2)
+        one_dim_copied = np.repeat(one_dim_obs[np.newaxis, :, :], self.n_players, axis=0)
+        
+        return np.concatenate([
+            two_dim_obs,
+            one_dim_copied
+        ], axis=2)
+            
+    def player_role_obs_np(self, index: int) -> np.ndarray:
+        """
+        Returns a one hot encoding of the player's role as a numpy 1D array of shape (Role.one_hot_dim(),).
+        """
+        return self.player_assignments[index].as_one_hot().astype(self.np_type)
+    
+    def player_roles_obs_np(self, from_perspective: Optional[int] = None) -> np.ndarray:
+        """
+        Returns the one hot encoding of the player's roles as a numpy 2D array with shape (n_players, Role.one_hot_dim()). If from_perspective is provided, the roles that the player cannot see are set to zero.
+        """
+        
+        player_obs = np.stack([
+            self.player_role_obs_np(i) for i in range(self.n_players)
+        ], axis=0)
+        
+        if from_perspective is not None:
+            for i in range(self.n_players):
+                if from_perspective == i: # player can see their own role
+                    continue
+                curr_role = self.player_assignments[from_perspective]
+                other_role = self.player_assignments[i]
+                if other_role not in ROLES_CAN_SEE[curr_role]:
+                    player_obs[i] = np.zeros_like(player_obs[i])
+                    
+        return player_obs
+                
+    ###################
+    # To Load BC Data #
+    ###################
+    
+    @classmethod
+    def from_json(cls, history: dict) -> AvalonGameState:
+        """Holy this is stupid af. I'm sorry."""
+        
+        was_leader = "VHleader"
+        was_picked = "VHpicked"
+        did_approve = "VHapprove"
+        did_reject = "VHreject"
+        
+        def get_actions(player_name: str, round_num: int) -> str:
+            round_count = 0
+            for quest_data in history['voteHistory'][player_name]:
+                for round_data in quest_data:
+                    if round_count == round_num:
+                        return round_data
+                    round_count += 1
+                    
+        def get_num_rounds() -> int:
+            default_player_name = list(history['voteHistory'].keys())[0]
+            round_count = 0
+            for quest_data in history['voteHistory'][default_player_name]:
+                round_count += len(quest_data)
+            return round_count
+        
+        def get_num_quests() -> int:
+            return len(history['missionHistory'])
+        
+        def get_first_turn_as_leader(player_name: str, max_rounds: int) -> Optional[int]:
+            for i in range(max_rounds):
+                if was_leader in get_actions(player_name, i):
+                    return i
+            return None
+        
+        def assign_indices_to_none_players(player_name_to_idx: Dict[str, Optional[int]]) -> None:
+            seen_inidices = set(player_name_to_idx.values())
+            missing_indices = [i for i in range(len(player_name_to_idx)) if i not in seen_inidices]
+            num_nones = len([idx for idx in player_name_to_idx.values() if idx is None])
+            
+            assert len(missing_indices) == num_nones
+            
+            for player_name, idx in player_name_to_idx.items():
+                if idx is None:
+                    player_name_to_idx[player_name] = missing_indices.pop()
+        
+        def get_role(player_name: str) -> Role:
+            if history["playerRoles"][player_name]["role"] == "Merlin":
+                return Role.MERLIN
+            elif history["playerRoles"][player_name]["role"] == "Resistance":
+                return Role.RESISTANCE
+            elif history["playerRoles"][player_name]["role"] == "Spy":
+                return Role.SPY
+            elif history["playerRoles"][player_name]["role"] == "Assassin":
+                return Role.SPY
+            else:
+                raise ValueError(f"Invalid role {history['playerRoles'][player_name]['role']} for player {player_name}")
+            
+        def get_game_stage(history: dict) -> GameStage:
+            if history['winningTeam'] == "Resistance":
+                return GameStage.RESISTANCE_WIN
+            elif history['winningTeam'] == "Spy":
+                return GameStage.SPY_WIN
+            else:
+                raise ValueError("Invalid game stage")
+            
+        def hadAssassination(history: dict) -> bool:
+            return "whoAssassinShot" in history
+        
+        def assassinShotMerlin(history: dict) -> bool:
+            return history["whoAssassinShot"] == "Merlin"
+        
+        def get_merlin_guess(history: dict, player_assignment: List[int]) -> str:
+            if not hadAssassination(history):
+                return None
+            did_shoot_merlin = assassinShotMerlin(history)
+            if did_shoot_merlin:
+                return player_assignment.index(Role.MERLIN)
+            else:
+                # We don't know exactly who the assassin guessed (dataset is vague), choose an arbitrary resistance player
+                return player_assignment.index(Role.RESISTANCE)
+                
+            
+        # Get number of rounds
+        n_rounds = get_num_rounds()
+        n_quests = get_num_quests()
+        
+        # Get player order (name -> index) mapping
+        player_name_to_idx: Dict[str, Optional[int]] = {player_name: get_first_turn_as_leader(player_name, n_rounds) for player_name in history['voteHistory'].keys()}
+        assign_indices_to_none_players(player_name_to_idx)
+        
+        # Get player roles
+        player_assignment = [Role.UNKNOWN for _ in range(len(player_name_to_idx))]
+        for player_name, idx in player_name_to_idx.items():
+            player_assignment[idx] = get_role(player_name)
+        
+        # Create game state
+        game_state = AvalonGameState(player_assignment, randomize_player_assignments=False)
+        
+        # Initialize game state
+        game_state.turns_until_hammer = [4] * n_rounds
+        
+        game_state.teams = [[] for _ in range(n_rounds)]
+        game_state.team_votes = [[] for _ in range(n_rounds)]
+        game_state.team_vote_results = [TeamVoteResult.REJECTED for _ in range(n_rounds)]
+        
+        game_state.quest_teams = [[] for _ in range(n_quests)]
+        game_state.quest_votes = [[] for _ in range(n_quests)]
+        game_state.quest_results = [QuestResult.FAILED for _ in range(n_quests)]
+        
+        # Fill in game state
+        game_state.round_num = n_rounds-1
+        game_state.quest_num = n_quests-1
+        game_state.leader_index = (n_rounds-1) % len(player_assignment)
+        
+        game_state.game_stage = get_game_stage(history)
+        game_state.round_stage = RoundStage.QUEST_VOTE
+        
+        game_state.team_size = TEAM_SIZE_BY_N_PLAYERS_AND_QUEST_NUM[len(player_assignment)][game_state.quest_num]
+        game_state.merlin_guess_player_idx = get_merlin_guess(history, player_assignment)
+        
+        game_state.quest_results = [
+            QuestResult.FAILED if result == "failed" else QuestResult.SUCCEEDED for result in history['missionHistory']
+        ]
+        
+        for player_name in history["voteHistory"].keys():
+            player_index = player_name_to_idx[player_name]
+            round_count = 0
+            for quest_num, quest_data in enumerate(history['voteHistory'][player_name]):
+                for i, round_data in enumerate(quest_data):
+                    game_state.turns_until_hammer[round_count] = 4-i
+                    if was_picked in round_data:
+                        game_state.teams[round_count].append(player_index)
+                    if did_approve in round_data:
+                        game_state.team_votes[round_count].append(TeamVote.APPROVE)
+                    elif did_reject in round_data:
+                        game_state.team_votes[round_count].append(TeamVote.REJECT)
+                    else: 
+                        raise ValueError("Invalid team vote")
+                    if i == len(quest_data)-1:
+                        game_state.team_vote_results[round_count] = TeamVoteResult.APPROVED
+                        game_state.quest_teams[quest_num] = game_state.teams[round_count]
+                    else:
+                        game_state.team_vote_results[round_count] = TeamVoteResult.REJECTED
+                    round_count += 1
+                    
+        def resolve_who_voted_how(game_state: AvalonGameState, quest_num: int, num_fails: int):
+            quest_team = game_state.quest_teams[quest_num]
+            player_assignment = game_state.player_assignments
+            quest_result = game_state.quest_results[quest_num]
+            
+            if num_fails == 0:
+                assert quest_result == QuestResult.SUCCEEDED
+                game_state.quest_votes[quest_num] = [QuestVote.SUCCESS for _ in quest_team]
+                return
+            
+            n_spies = len([player_idx for player_idx in quest_team if player_assignment[player_idx] == Role.SPY])
+            assert num_fails <= n_spies, (
+                f"Number of fails ({num_fails}) must be less than or equal to number of spies ({n_spies})"
+            )
+            
+            quest_votes = []
+            n_more_fails_allowed = num_fails
+            for player_idx in quest_team:
+                if player_assignment[player_idx] == Role.SPY:
+                    if n_more_fails_allowed > 0:
+                        quest_votes.append(QuestVote.FAIL)
+                        n_more_fails_allowed -= 1
+                    else:
+                        quest_votes.append(QuestVote.SUCCESS)
+                else:
+                    quest_votes.append(QuestVote.SUCCESS)
+            
+            game_state.quest_votes[quest_num] = quest_votes
+            
+        for quest_num, quest_result in enumerate(game_state.quest_results):
+            num_fails = history["numFailsHistory"][quest_num]
+            resolve_who_voted_how(game_state, quest_num, num_fails)
+        
+        # ensure hammer rounds are all approves
+        for i in range(n_rounds):
+            if game_state.turns_until_hammer[i] == 0:
+                game_state.team_votes[i] = [TeamVote.APPROVE] * len(player_assignment)
+                # game_state.team_vote_results[i] = TeamVoteResult.APPROVED
+        
+        return game_state
