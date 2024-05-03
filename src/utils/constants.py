@@ -1,5 +1,7 @@
 import os
 
 DATA_DIR = '.data'
+MODELS_DIR = '.models'
 
-BELIEF_DATASET_PATH = os.path.join(DATA_DIR, 'belief_dataset.npz')
+TRAIN_BELIEF_DATASET_PATH = os.path.join(DATA_DIR, 'train_belief_dataset.npz')
+VAL_BELIEF_DATASET_PATH = os.path.join(DATA_DIR, 'val_belief_dataset.npz')

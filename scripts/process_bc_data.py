@@ -1,11 +1,14 @@
 
 import os
 import json
+import random
+    
 from src.utils.constants import DATA_DIR
 
 # TODO: Make these args
 INPUT_FILE_NAME = "games.json"
 INPUT_FILE_PATH = os.path.join(DATA_DIR, INPUT_FILE_NAME)
+PERCENT_TRAIN = 0.9
     
 if __name__ == '__main__':
       
@@ -62,3 +65,22 @@ if __name__ == '__main__':
     print(f"Writing {len(filtered_games)} filtered games to {final_file_name}")
     with open(os.path.join(DATA_DIR, final_file_name), "w") as f:
         json.dump(filtered_games, f, indent=4)
+        
+    # Split the dataset into training and validation sets
+    # shuffle the games
+    random.seed(0)
+    random.shuffle(filtered_games)
+    
+    train_idx = int(len(filtered_games) * PERCENT_TRAIN)
+    train_games = filtered_games[:train_idx]
+    val_games = filtered_games[train_idx:]
+    
+    train_file_name = INPUT_FILE_NAME.split(".")[0] + "_train.json"
+    val_file_name = INPUT_FILE_NAME.split(".")[0] + "_val.json"
+    
+    print(f"Writing {len(train_games)} training games to {train_file_name}")
+    with open(os.path.join(DATA_DIR, train_file_name), "w") as f:
+        json.dump(train_games, f, indent=4)
+    print(f"Writing {len(val_games)} validation games to {val_file_name}")
+    with open(os.path.join(DATA_DIR, val_file_name), "w") as f:
+        json.dump(val_games, f, indent=4)
