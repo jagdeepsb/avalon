@@ -1,10 +1,10 @@
 from typing import List
 import random
 
-from src.utils import (
+from src.game.utils import (
     TeamVote, QuestVote,
 )
-from src.game_state import AvalonGameState
+from src.game.game_state import AvalonGameState
 from src.players.player import AvalonPlayer
     
 class RandomAvalonPlayer(AvalonPlayer):

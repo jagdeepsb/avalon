@@ -1,9 +1,7 @@
 from typing import List, Tuple, Dict
 from enum import Enum
 import numpy as np
-
-DATA_DIR = '.data'
-
+\
 class Role(Enum):
     MERLIN = 0
     RESISTANCE = 1

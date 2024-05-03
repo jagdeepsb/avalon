@@ -11,10 +11,10 @@ import tyro
 import time
 
 
-from src.utils import (
+from src.game.utils import (
     TeamVote, QuestVote,
 )
-from src.game_state import AvalonGameState
+from src.game.game_state import AvalonGameState
 from src.players.player import AvalonPlayer
     
 class PPOAvalonPlayer(AvalonPlayer, nn.Module):

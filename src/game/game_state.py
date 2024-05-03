@@ -2,12 +2,12 @@ from __future__ import annotations
 from typing import List, Tuple, Dict, Optional
 import random
 import numpy as np
-from src.utils import (
+from src.game.utils import (
     Role, TeamVote, TeamVoteResult, QuestVote,
     QuestResult, RoundStage, GameStage, ROLES_CAN_SEE,
     TEAM_SIZE_BY_N_PLAYERS_AND_QUEST_NUM
 )
-
+from src.game.beliefs import make_trivial_role_assignment_distribution
 class AvalonGameState:
     """
     Stores the state of an Avalon game. State can be updated by calling the appropriate methods:
@@ -271,6 +271,11 @@ class AvalonGameState:
             game_history,
             player_roles_expanded
         ], axis=2) # (n_players, max_rounds, 7 + Role.one_hot_dim())
+        
+    def ground_truth_role_distribution(self,) -> np.ndarray:
+        return make_trivial_role_assignment_distribution(
+            self.player_assignments
+        )
     
     #########################
     # Game History As Numpy #

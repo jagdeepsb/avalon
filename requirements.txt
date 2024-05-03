@@ -4,3 +4,4 @@ matplotlib
 gym
 tqdm
 torch-summary
+einops

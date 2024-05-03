@@ -1,16 +1,16 @@
 
 import os
 import json
-from src.utils import DATA_DIR
+from src.utils.constants import DATA_DIR
 
+# TODO: Make these args
+INPUT_FILE_NAME = "games.json"
+INPUT_FILE_PATH = os.path.join(DATA_DIR, INPUT_FILE_NAME)
+    
 if __name__ == '__main__':
-    
-    # File path
-    file_name = "games.json"
-    file_path = os.path.join(DATA_DIR, file_name)
-    
+      
     # load file as string
-    with open(file_path, "r") as f:
+    with open(INPUT_FILE_PATH, "r") as f:
         games_str = f.read()
 
     # replace a single quote with a double quote
@@ -26,16 +26,16 @@ if __name__ == '__main__':
     games_str = games_str.replace("False", "false")
 
     # write the string to a new file
-    temp_file_name = file_name.split(".")[0] + "_temp.json"
+    temp_file_name = INPUT_FILE_NAME.split(".")[0] + "_temp.json"
     out_file = os.path.join(DATA_DIR, temp_file_name)
     with open(out_file, "w") as f:
         f.write(games_str)
 
     # load file as json
-    file_path = os.path.join(DATA_DIR, temp_file_name)
-    with open(file_path, "r") as f:
+    INPUT_FILE_PATH = os.path.join(DATA_DIR, temp_file_name)
+    with open(INPUT_FILE_PATH, "r") as f:
         games = json.load(f)
-    print(f"Found {len(games)} games in {file_name}")
+    print(f"Found {len(games)} games in {INPUT_FILE_NAME}")
     
     # filter out only games with 5 players and roles Merlin and Assassin
     def should_include(game):
@@ -58,7 +58,7 @@ if __name__ == '__main__':
     filtered_games = [game for game in games if should_include(game)]
     
     # write filtered games to a new file
-    final_file_name = file_name.split(".")[0] + "_final.json"
+    final_file_name = INPUT_FILE_NAME.split(".")[0] + "_final.json"
     print(f"Writing {len(filtered_games)} filtered games to {final_file_name}")
     with open(os.path.join(DATA_DIR, final_file_name), "w") as f:
         json.dump(filtered_games, f, indent=4)

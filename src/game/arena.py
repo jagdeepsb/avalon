@@ -2,13 +2,13 @@ from typing import List, Callable, Tuple, Dict, Optional
 import numpy as np
 from tqdm import tqdm
 
-from src.game_state import AvalonGameState
+from src.game.game_state import AvalonGameState
 from src.players.player import AvalonPlayer
-from src.utils import (
+from src.game.utils import (
     Role, TeamVote, TeamVoteResult, QuestVote,
     QuestResult, RoundStage, GameStage,
 )
-from src.simulator import AvalonSimulator
+from src.game.simulator import AvalonSimulator
 
 
 class AvalonArena():

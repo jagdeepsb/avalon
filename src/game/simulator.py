@@ -1,9 +1,9 @@
 from typing import List, Callable
 import numpy as np
 
-from src.game_state import AvalonGameState
+from src.game.game_state import AvalonGameState
 from src.players.player import AvalonPlayer
-from src.utils import (
+from src.game.utils import (
     Role, TeamVote, TeamVoteResult, QuestVote,
     QuestResult, RoundStage, GameStage,
 )

@@ -2,12 +2,12 @@ from __future__ import annotations
 from typing import List
 import random
 
-from src.utils import (
+from src.game.utils import (
     TeamVote, QuestVote,
 )
-from src.game_state import AvalonGameState
+from src.game.game_state import AvalonGameState
 from src.players.player import AvalonPlayer
-from src.utils import Role
+from src.game.utils import Role
 
 def stupid_hardcoded_player_factory(role: Role, index: int) -> AvalonPlayer:
     """

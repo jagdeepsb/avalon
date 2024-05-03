@@ -2,7 +2,7 @@ from typing import List, Tuple, Dict, Set
 from itertools import permutations
 import numpy as np
 
-from src.utils import Role
+from src.game.utils import Role
 
 ALL_ROLE_ASSIGNMENTS_CACHE: Dict[Tuple[Role], List[Tuple[Role]]] = {}
 

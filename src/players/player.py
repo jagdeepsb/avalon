@@ -1,9 +1,9 @@
 from typing import List
 
-from src.utils import (
+from src.game.utils import (
     Role, TeamVote, QuestVote,
 )
-from src.game_state import AvalonGameState
+from src.game.game_state import AvalonGameState
 
 class AvalonPlayer:
     """
