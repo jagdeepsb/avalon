@@ -1,6 +1,6 @@
 import time
-from src.utils import Role
-from src.simulator import AvalonSimulator
+from src.game.utils import Role
+from src.game.simulator import AvalonSimulator
 from src.players.stupid_hardcoded_player import stupid_hardcoded_player_factory
 
 roles = [

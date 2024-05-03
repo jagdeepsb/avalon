@@ -1,8 +1,8 @@
-from src.utils import Role
-from src.simulator import AvalonSimulator
+from src.game.utils import Role
+from src.game.simulator import AvalonSimulator
 from src.players.random_player import RandomAvalonPlayer
 from src.players.stupid_hardcoded_player import stupid_hardcoded_player_factory
-from src.arena import AvalonArena
+from src.game.arena import AvalonArena
 
 def random_player_factory(role: Role, index: int) -> RandomAvalonPlayer:
     return RandomAvalonPlayer(role, index)
