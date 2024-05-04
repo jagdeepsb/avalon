@@ -159,7 +159,8 @@ class BeliefPredictor(nn.Module):
         x = Rearrange("b n_players n_history d -> b n_players n_history d")(x)
         
         # transformers
-        # x = self.transformer_1(x)
+        x = self.transformer_1(x)
+        x = self.transformer_2(x)
         
         # decoding
         x = nn.Flatten()(x)

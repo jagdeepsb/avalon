@@ -3,6 +3,7 @@ import torch
 from torch import optim
 from torch.utils.data import DataLoader
 import numpy as np
+from tqdm import tqdm
 
 from src.game.utils import Role
 from src.utils.constants import (
@@ -41,7 +42,7 @@ def validate(model: BeliefPredictor, val_dataset: BeliefDataset):
 
 if __name__ == "__main__":
     
-    EXPERIMENT_NAME = "belief_simple_16_30_10"
+    EXPERIMENT_NAME = "belief_tf_16_30_10"
     
     # Problem spec
     roles = [
@@ -83,7 +84,7 @@ if __name__ == "__main__":
     
     for epoch in range(n_epochs):
         avg_loss = 0
-        for i, (x, y) in enumerate(train_loader):
+        for i, (x, y) in tqdm(enumerate(train_loader)):
             optimizer.zero_grad()
             y_pred = model(x)
             loss = criterion(y_pred, y)
