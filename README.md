@@ -1,5 +1,5 @@
 # avalon
-fuck
+Bot
 
 # Install
 
