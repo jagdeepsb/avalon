@@ -12,7 +12,7 @@ from src.utils.constants import (
 )
 from src.datasets.belief_dataset import BeliefDataset
 from src.models.belief_predictor import BeliefPredictor
-from src.game.beliefs import num_possible_assignments
+from src.game.beliefs import all_possible_ordered_role_assignments
 
 
 def validate(model: BeliefPredictor, val_dataset: BeliefDataset):
@@ -51,7 +51,7 @@ if __name__ == "__main__":
         Role.SPY,
         Role.SPY,
     ]
-    n_classes = num_possible_assignments(roles)
+    n_classes = len(all_possible_ordered_role_assignments(roles))
     
     # Load dataset
     train_data = np.load(TRAIN_BELIEF_DATASET_PATH)

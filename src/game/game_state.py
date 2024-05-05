@@ -7,7 +7,7 @@ from src.game.utils import (
     QuestResult, RoundStage, GameStage, ROLES_CAN_SEE,
     TEAM_SIZE_BY_N_PLAYERS_AND_QUEST_NUM
 )
-from src.game.beliefs import make_trivial_role_assignment_distribution
+from src.game.beliefs import Belief
 class AvalonGameState:
     """
     Stores the state of an Avalon game. State can be updated by calling the appropriate methods:
@@ -273,9 +273,9 @@ class AvalonGameState:
         ], axis=2) # (n_players, max_rounds, 7 + Role.one_hot_dim())
         
     def ground_truth_role_distribution(self,) -> np.ndarray:
-        return make_trivial_role_assignment_distribution(
+        return Belief.trivial_distribution(
             self.player_assignments
-        )
+        ).distribution
     
     #########################
     # Game History As Numpy #
