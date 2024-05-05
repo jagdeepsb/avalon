@@ -108,3 +108,22 @@ class Belief:
         assert np.allclose(distribution.sum(), 1.0)
         
         return cls(all_assignments, distribution)
+    
+    @classmethod
+    def smoothed_triangle_distribution(cls, role_assignment: List[Role]) -> Belief:
+        """
+        Create a smoothed distribution where the probability mass for each role assignment is proportional
+        to some monotonic function of how many roles match the given role assignment.
+        """
+        
+        def count_match(assignment: Tuple[Role]) -> int:
+            return sum([1 for r1, r2 in zip(role_assignment, assignment) if r1 == r2])**2
+        
+        all_assignments = all_possible_ordered_role_assignments(role_assignment)
+        distribution = np.zeros(len(all_assignments))
+        for i, assignment in enumerate(all_assignments):
+            distribution[i] = count_match(assignment)
+        distribution /= distribution.sum()
+        assert np.allclose(distribution.sum(), 1.0)
+        
+        return cls(all_assignments, distribution)

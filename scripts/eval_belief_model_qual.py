@@ -90,7 +90,8 @@ def run_game_from_perspective(
     
 if __name__ == "__main__":
     
-    EXPERIMENT_NAME = "belief_tf_16_30_10"
+    # EXPERIMENT_NAME = "belief_tf_16_30_10"
+    EXPERIMENT_NAME = "belief_debug_16_30_10"
 
     # Load Games
     EVAL_GAMES_PATH = os.path.join(DATA_DIR, "games_val.json")
@@ -105,7 +106,7 @@ if __name__ == "__main__":
     model.eval()
     
     # Run a single game from each players perspective
-    game_idx = 1
+    game_idx = 0
     for player_idx in range(len(eval_game_states[game_idx].player_assignments)):
         print(f"\n\n=========================\n==== Player Index: {player_idx} ====\n=========================\n\n")
         game_state = eval_game_states[game_idx]

@@ -61,12 +61,19 @@ def get_belief_score(belief: Belief, role_assignment: List[Role]) -> float:
     """
     Get the score of a belief for a given role assignment
     """
-    total_scores = []
-    # For each player, determine how well the belief predicts their true role.
-    for player_idx in range(len(role_assignment)):
-        player_i_score = belief.marginalize([role_assignment[i] if i == player_idx else Role.UNKNOWN for i in range(len(role_assignment))])
-        total_scores.append(player_i_score)
-    return np.mean(total_scores)
+    # total_scores = []
+    # # For each player, determine how well the belief predicts their true role.
+    # for player_idx in range(len(role_assignment)):
+    #     player_i_score = belief.marginalize([role_assignment[i] if i == player_idx else Role.UNKNOWN for i in range(len(role_assignment))])
+    #     total_scores.append(player_i_score)
+    # return np.mean(total_scores)
+    
+    # return 1 if belief is in top 3
+    top_assignments = belief.get_top_k_assignments(3)
+    for assignment, _ in top_assignments:
+        if assignment == tuple(role_assignment):
+            return 1
+    return 0
 
 def get_belief_scores_throughout_game(
     game_state: AvalonGameState,
@@ -149,14 +156,15 @@ def run_game_from_perspective(
 if __name__ == "__main__":
     
     # EXPERIMENT_NAME = "belief_tf_16_30_10"
-    EXPERIMENT_NAME = "belief_simple_16_30_10"
+    # EXPERIMENT_NAME = "belief_simple_16_30_10"
+    EXPERIMENT_NAME = "belief_debug_16_30_10"
     
     # Load Games
-    EVAL_GAMES_PATH = os.path.join(DATA_DIR, "games_val.json")
+    # EVAL_GAMES_PATH = os.path.join(DATA_DIR, "games_val.json")
     # EVAL_GAMES_PATH = os.path.join(DATA_DIR, "games_train.json")
     with open(EVAL_GAMES_PATH, "r") as f:
         eval_games = json.load(f)
-    eval_game_states = [AvalonGameState.from_json(game) for game in eval_games]
+    eval_game_states = [AvalonGameState.from_json(game) for game in eval_games][:200]
     
     # Load model
     model_path = os.path.join(MODELS_DIR, f"{EXPERIMENT_NAME}.pt")

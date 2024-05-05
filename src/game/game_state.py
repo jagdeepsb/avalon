@@ -273,7 +273,10 @@ class AvalonGameState:
         ], axis=2) # (n_players, max_rounds, 7 + Role.one_hot_dim())
         
     def ground_truth_role_distribution(self,) -> np.ndarray:
-        return Belief.trivial_distribution(
+        # return Belief.trivial_distribution(
+        #     self.player_assignments
+        # ).distribution
+        return Belief.smoothed_triangle_distribution(
             self.player_assignments
         ).distribution
     
@@ -310,7 +313,7 @@ class AvalonGameState:
     def who_was_leader_np(self) -> np.ndarray:
         """
         Get the leader in each round as a numpy array with shape (max_rounds, n_players). 
-        1 = leader, fractional = counts down to leader.
+        1 = leader, fractional = counts up to leader.
         """
         
         leader_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
@@ -325,11 +328,12 @@ class AvalonGameState:
     def teams_np(self) -> np.ndarray:
         """
         Get the teams proposed in each round as a numpy array with shape (n_players, max_rounds). 
-        0 = not in team, 1 = in team.
+        0 = hasnt happened, 0.5 = not on team, 1 = on team.
         """
         
         teams_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
         for i, team in enumerate(self.teams):
+            teams_np[:, i] = 0.5
             teams_np[team, i] = 1
         return teams_np
     
@@ -337,32 +341,32 @@ class AvalonGameState:
     def team_votes_np(self) -> np.ndarray:
         """
         Get the votes on the teams proposed in each round as a numpy array with shape
-        (n_players, max_rounds). 0 = reject, 1 = approve.
+        (n_players, max_rounds). 0 = hasnt happened, 0.5 = reject, 1 = approve.
         """
         
         team_votes_np = np.zeros((self.n_players, self.max_rounds), dtype=self.np_type)
         for i, team_votes in enumerate(self.team_votes):
             for j, vote in enumerate(team_votes):
-                team_votes_np[j, i] = 1 if vote == TeamVote.APPROVE else 0
+                team_votes_np[j, i] = 1 if vote == TeamVote.APPROVE else 0.5
         return team_votes_np
     
     @property
     def team_vote_results_np(self) -> np.ndarray:
         """
         Get the results of the team votes in each round as a numpy array with shape (max_rounds,).
-        0 = rejected, 1 = approved.
+        0 = hasnt happened, 0.5 = rejected, 1 = approved.
         """
         
         team_vote_results_np = np.zeros(self.max_rounds, dtype=self.np_type)
         for i, result in enumerate(self.team_vote_results):
-            team_vote_results_np[i] = 1 if result == TeamVoteResult.APPROVED else 0
+            team_vote_results_np[i] = 1 if result == TeamVoteResult.APPROVED else 0.5
         return team_vote_results_np
     
     @property
     def quest_votes_np(self) -> np.ndarray:
         """
         Get the votes on the teams proposed for each quest as a numpy array with shape (max_rounds). 
-        value=0.5*num_fails.
+        value=0.5*(num_fails+1).
         """
         
         quest_votes_np = np.zeros((self.max_rounds,), dtype=self.np_type)
@@ -372,7 +376,7 @@ class AvalonGameState:
                 break
             if result == TeamVoteResult.APPROVED:
                 num_fails = self.quest_votes[quest_counter].count(QuestVote.FAIL)
-                quest_votes_np[i] = 0.5*num_fails
+                quest_votes_np[i] = 0.5*(num_fails + 1)
                 quest_counter += 1
         return quest_votes_np
     
@@ -380,7 +384,7 @@ class AvalonGameState:
     def quest_results_np(self) -> np.ndarray:
         """
         Get the results of the quests as a numpy array with shape (max_rounds,). 
-        1 = failed, 0 = succeeded.
+        0 = hasnt happened, 0.5 = failed, 1 = succeeded.
         """
         
         quest_results_np = np.zeros(self.max_rounds, dtype=self.np_type)
@@ -389,7 +393,7 @@ class AvalonGameState:
             if quest_counter == len(self.quest_results):
                 break
             if result == TeamVoteResult.APPROVED:
-                quest_results_np[i] = 1 if self.quest_results[quest_counter] == QuestResult.FAILED else 0
+                quest_results_np[i] = 0.5 if self.quest_results[quest_counter] == QuestResult.FAILED else 1
                 quest_counter += 1
         return quest_results_np
     
