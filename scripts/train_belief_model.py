@@ -7,15 +7,17 @@ import numpy as np
 from src.game.utils import Role
 from src.utils.constants import (
     MODELS_DIR,
-    TRAIN_BELIEF_DATASET_PATH,
-    VAL_BELIEF_DATASET_PATH,
+    RES_TRAIN_BELIEF_DATASET_PATH,
+    RES_VAL_BELIEF_DATASET_PATH,
+    SPY_TRAIN_BELIEF_DATASET_PATH,
+    SPY_VAL_BELIEF_DATASET_PATH,
 )
 from src.datasets.belief_dataset import BeliefDataset
 from src.models.belief_predictor import BeliefPredictor
-from src.game.beliefs import num_possible_assignments
+from src.game.beliefs import all_possible_ordered_role_assignments
 
 
-def validate(model: BeliefPredictor, val_dataset: BeliefDataset):
+def validate(model: BeliefPredictor, val_dataset: BeliefDataset) -> float:
     """
     Validate the model on the validation dataset
     """
@@ -36,12 +38,13 @@ def validate(model: BeliefPredictor, val_dataset: BeliefDataset):
             
             avg_loss += loss.item()
     avg_loss /= len(val_loader)
-    print(f"Validation Loss: {avg_loss}")
+    return avg_loss
     
 
 if __name__ == "__main__":
     
-    EXPERIMENT_NAME = "belief_simple_16_30_10"
+    EXPERIMENT_NAME = "belief_debug_16_30_10"
+    is_spy = False
     
     # Problem spec
     roles = [
@@ -51,13 +54,19 @@ if __name__ == "__main__":
         Role.SPY,
         Role.SPY,
     ]
-    n_classes = num_possible_assignments(roles)
+    n_classes = len(all_possible_ordered_role_assignments(roles))
     
     # Load dataset
-    train_data = np.load(TRAIN_BELIEF_DATASET_PATH)
-    train_game_histories, train_belief_distributions = train_data["game_histories"], train_data["game_beliefs"]
-    val_data = np.load(VAL_BELIEF_DATASET_PATH)
-    val_game_histories, val_belief_distributions = val_data["game_histories"], val_data["game_beliefs"]
+    if is_spy:
+        train_data = np.load(SPY_TRAIN_BELIEF_DATASET_PATH)
+        train_game_histories, train_belief_distributions = train_data["game_histories"], train_data["game_beliefs"]
+        val_data = np.load(SPY_VAL_BELIEF_DATASET_PATH)
+        val_game_histories, val_belief_distributions = val_data["game_histories"], val_data["game_beliefs"]
+    else:
+        train_data = np.load(RES_TRAIN_BELIEF_DATASET_PATH)
+        train_game_histories, train_belief_distributions = train_data["game_histories"], train_data["game_beliefs"]
+        val_data = np.load(RES_VAL_BELIEF_DATASET_PATH)
+        val_game_histories, val_belief_distributions = val_data["game_histories"], val_data["game_beliefs"]
 
     print(f"Train game history shape: {train_game_histories.shape}")
     print(f"Train belief shape: {train_belief_distributions.shape}")
@@ -79,7 +88,7 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters())
     criterion = torch.nn.CrossEntropyLoss()
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    n_epochs = 50
+    n_epochs = 25
     
     for epoch in range(n_epochs):
         avg_loss = 0
@@ -90,7 +99,8 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
             avg_loss += loss.item()
-        print(f"Epoch {epoch}: Avg Loss {avg_loss / len(train_loader)}")
+        validation_loss = validate(model, val_dataset)
+        print(f"Epoch {epoch}: Avg Loss {avg_loss / len(train_loader)} Validation Loss {validation_loss}")
         
     # Save model
     model_save_path = os.path.join(MODELS_DIR, f"{EXPERIMENT_NAME}.pt")
@@ -99,4 +109,4 @@ if __name__ == "__main__":
     torch.save(model, model_save_path)
         
     # Validate
-    validate(model, val_dataset)
+    print(f"Validation Loss: {validate(model, val_dataset)}")

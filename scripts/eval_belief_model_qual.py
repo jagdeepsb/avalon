@@ -12,7 +12,7 @@ from src.utils.constants import (
 )
 from src.game.game_state import AvalonGameState
 from src.models.belief_predictor import BeliefPredictor
-from src.game.beliefs import num_possible_assignments, all_role_assignments
+from src.game.beliefs import all_possible_ordered_role_assignments
 from src.players.mimic_player import get_mimic_player_factory
 from src.game.simulator import AvalonSimulator
 
@@ -44,7 +44,7 @@ def print_useful_belief_information(roles: List[Role], beliefs: np.ndarray):
     """
     
     # get assignments
-    all_assignments = all_role_assignments(roles)
+    all_assignments = all_possible_ordered_role_assignments(roles)
     
     # get indices of beliefs in descending order
     k = 5
@@ -90,41 +90,25 @@ def run_game_from_perspective(
     
 if __name__ == "__main__":
     
-    EXPERIMENT_NAME = "belief_simple_16_30_10"
-    
-    # Problem spec
-    roles = [
-        Role.MERLIN,
-        Role.RESISTANCE,
-        Role.RESISTANCE,
-        Role.SPY,
-        Role.SPY,
-    ]
-    encoding_dim = 16
-    n_classes = num_possible_assignments(roles)
-    feature_dim = 10
-    
+    # EXPERIMENT_NAME = "belief_tf_16_30_10"
+    EXPERIMENT_NAME = "belief_debug_16_30_10"
+
     # Load Games
-    
-    VAL_GAMES_PATH = os.path.join(DATA_DIR, "games_val.json")
-    with open(VAL_GAMES_PATH, "r") as f:
-        val_games = json.load(f)
-    val_game_states = [AvalonGameState.from_json(game) for game in val_games]
+    EVAL_GAMES_PATH = os.path.join(DATA_DIR, "games_val.json")
+    # EVAL_GAMES_PATH = os.path.join(DATA_DIR, "games_train.json")
+    with open(EVAL_GAMES_PATH, "r") as f:
+        eval_games = json.load(f)
+    eval_game_states = [AvalonGameState.from_json(game) for game in eval_games]
     
     # Load model
-    # model = BeliefPredictor(
-    #     encoding_dim=encoding_dim,
-    #     n_classes=n_classes,
-    #     feature_dim=feature_dim,
-    # )
     model_path = os.path.join(MODELS_DIR, f"{EXPERIMENT_NAME}.pt")
     model: BeliefPredictor = torch.load(model_path)
     model.eval()
     
     # Run a single game from each players perspective
-    game_idx = 1
-    for player_idx in range(len(roles)):
+    game_idx = 0
+    for player_idx in range(len(eval_game_states[game_idx].player_assignments)):
         print(f"\n\n=========================\n==== Player Index: {player_idx} ====\n=========================\n\n")
-        game_state = val_game_states[game_idx]
+        game_state = eval_game_states[game_idx]
         final_game_state = run_game_from_perspective(game_state, model, player_idx)
         print(f"Game Outcome: {final_game_state.game_stage}")

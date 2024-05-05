@@ -97,7 +97,8 @@ class SelfAttentionTransformer(nn.Module):
         
         out = Rearrange("b d n_players n_history -> b n_players n_history d")(out)
         return out
- 
+
+
 class BeliefPredictor(nn.Module):
     def __init__(
         self,
@@ -118,30 +119,42 @@ class BeliefPredictor(nn.Module):
         self.positional_encoding_for_players = getPositionEncoding(n_players, encoding_dim)
         self.positional_encoding_for_history = getPositionEncoding(n_history_length, encoding_dim)
         
-        self.transformer_1 = SelfAttentionTransformer(
-            n_players=n_players,
-            n_history_length=n_history_length,
-            embedding_dim=encoding_dim,
-            num_heads=4,
-            dropout=0.1
-        )
-        self.transformer_2 = SelfAttentionTransformer(
-            n_players=n_players,
-            n_history_length=n_history_length,
-            embedding_dim=encoding_dim,
-            num_heads=4,
-            dropout=0.1
-        )
-        self.transformer_2 = SelfAttentionTransformer(
-            n_players=n_players,
-            n_history_length=n_history_length,
-            embedding_dim=encoding_dim,
-            num_heads=4,
-            dropout=0.1
+        
+        self.round_conv_1 = nn.Conv2d(
+            in_channels=encoding_dim,
+            out_channels=encoding_dim,
+            kernel_size=(n_players, 1),
+            stride=(1, 1),
+            padding=(0, 0),
         )
         
+        self.round_conv_2 = nn.Conv2d(
+            in_channels=encoding_dim,
+            out_channels=encoding_dim,
+            kernel_size=(n_players, 1),
+            stride=(1, 1),
+            padding=(0, 0),
+        )
         
-        self.decoding = nn.Linear(n_players * n_history_length * encoding_dim, n_classes)
+        self.player_conv_1 = nn.Conv2d(
+            in_channels=encoding_dim,
+            out_channels=encoding_dim,
+            kernel_size=(1, n_history_length),
+            stride=(1, 1),
+            padding=(0, 0),
+        )
+        
+        self.player_conv_2 = nn.Conv2d(
+            in_channels=encoding_dim,
+            out_channels=encoding_dim,
+            kernel_size=(1, n_history_length),
+            stride=(1, 1),
+            padding=(0, 0),
+        )
+        
+        self.relu = nn.ReLU()
+        
+        self.decoding = nn.Linear(n_players * encoding_dim, n_classes)
         self.softmax = nn.Softmax(dim=1)
         
     def forward(self, x: torch.Tensor):
@@ -150,22 +163,134 @@ class BeliefPredictor(nn.Module):
         """
         
         # encoding
-        x = Rearrange("b n_players n_history d -> b d n_players n_history")(x)
-        x = self.encoding_conv(x)
-        x = Rearrange("b d n_players n_history -> b n_history n_players d")(x)
-        x = x + self.positional_encoding_for_players
-        x = Rearrange("b n_history n_players d -> b n_players n_history d")(x)
-        x = x + self.positional_encoding_for_history
-        x = Rearrange("b n_players n_history d -> b n_players n_history d")(x)
+        out = Rearrange("b n_players n_history d -> b d n_players n_history")(x)
+        out = self.encoding_conv(out)
+        out = Rearrange("b d n_players n_history -> b n_history n_players d")(out)
+        out = out + self.positional_encoding_for_players
+        out = Rearrange("b n_history n_players d -> b n_players n_history d")(out)
+        out = out + self.positional_encoding_for_history
+        x_1 = Rearrange("b n_players n_history d -> b d n_players n_history")(out)
         
-        # transformers
-        # x = self.transformer_1(x)
+        # operations
+        out = self.round_conv_1(x_1)
+        x_2 = self.relu(out) + x_1 # residual connection
+        out = self.player_conv_1(x_2)
+        x_3 = self.relu(out) + x_2 # residual connection
+        out = self.round_conv_2(x_3)
+        x_4 = self.relu(out) + x_3 # residual connection
+        out = self.player_conv_2(x_4)
+        x_5 = self.relu(out) + x_4 # residual connection
+        
+        out = torch.einsum("bdph->bdp", x_5)
         
         # decoding
-        x = nn.Flatten()(x)
-        x = self.decoding(x)
-        # x = self.softmax(x)
-        return x
+        out = nn.Flatten()(out)
+        out = self.decoding(out)
+        
+        return out
+
+# class BeliefPredictor(nn.Module):
+#     """
+#     Epoch 9: Avg Loss 0.41714328616785196 Validation Loss 4.3838596116558834
+#     Overfit like crazy on train, no interesting progress on val
+#     """
+#     def __init__(
+#         self,
+#         encoding_dim: int,
+#         n_classes: int,
+#         n_players: int = 5,
+#         n_history_length: int = 25,
+#         feature_dim: int = 10,
+#     ):
+#         super(BeliefPredictor, self).__init__()
+        
+#         hidden_layer_dim = 256
+#         self.layers = nn.Sequential(
+#             nn.Linear(n_players * n_history_length * feature_dim, hidden_layer_dim),
+#             nn.GELU(),
+#             nn.Linear(hidden_layer_dim, hidden_layer_dim),
+#             nn.GELU(),
+#             nn.Linear(hidden_layer_dim, n_classes),
+#         )
+        
+#     def forward(self, x: torch.Tensor):
+#         """
+#         Input shape: (batch_size, n_players, n_history, feature_dim)
+#         """
+        
+#         x = nn.Flatten()(x)
+#         x = self.layers(x)
+#         return x
+ 
+# class BeliefPredictor(nn.Module):
+#     def __init__(
+#         self,
+#         encoding_dim: int,
+#         n_classes: int,
+#         n_players: int = 5,
+#         n_history_length: int = 25,
+#         feature_dim: int = 10,
+#     ):
+#         super(BeliefPredictor, self).__init__()
+#         self.encoding_conv = nn.Conv2d(
+#             in_channels=feature_dim,
+#             out_channels=encoding_dim,
+#             kernel_size=(1, 1),
+#             stride=(1, 1),
+#             padding=(0, 0),
+#         )
+#         self.positional_encoding_for_players = getPositionEncoding(n_players, encoding_dim)
+#         self.positional_encoding_for_history = getPositionEncoding(n_history_length, encoding_dim)
+        
+#         self.transformer_1 = SelfAttentionTransformer(
+#             n_players=n_players,
+#             n_history_length=n_history_length,
+#             embedding_dim=encoding_dim,
+#             num_heads=4,
+#             dropout=0.1
+#         )
+#         self.transformer_2 = SelfAttentionTransformer(
+#             n_players=n_players,
+#             n_history_length=n_history_length,
+#             embedding_dim=encoding_dim,
+#             num_heads=4,
+#             dropout=0.1
+#         )
+#         self.transformer_2 = SelfAttentionTransformer(
+#             n_players=n_players,
+#             n_history_length=n_history_length,
+#             embedding_dim=encoding_dim,
+#             num_heads=4,
+#             dropout=0.1
+#         )
+        
+        
+#         # self.decoding = nn.Linear(n_players * n_history_length * encoding_dim, n_classes)
+#         self.decoding = nn.Linear(n_players * n_history_length * feature_dim, n_classes)
+#         self.softmax = nn.Softmax(dim=1)
+        
+#     def forward(self, x: torch.Tensor):
+#         """
+#         Input shape: (batch_size, n_players, n_history, feature_dim)
+#         """
+        
+#         # encoding
+#         # x = Rearrange("b n_players n_history d -> b d n_players n_history")(x)
+#         # x = self.encoding_conv(x)
+#         # x = Rearrange("b d n_players n_history -> b n_history n_players d")(x)
+#         # x = x + self.positional_encoding_for_players
+#         # x = Rearrange("b n_history n_players d -> b n_players n_history d")(x)
+#         # x = x + self.positional_encoding_for_history
+#         # x = Rearrange("b n_players n_history d -> b n_players n_history d")(x)
+        
+#         # transformers
+#         # x = self.transformer_1(x)
+        
+#         # decoding
+#         x = nn.Flatten()(x)
+#         x = self.decoding(x)
+#         # x = self.softmax(x)
+#         return x
  
 if __name__ == "__main__":   
     model = BeliefPredictor(encoding_dim=16, n_classes=30)

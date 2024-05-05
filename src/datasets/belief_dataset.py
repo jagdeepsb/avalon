@@ -9,6 +9,10 @@ class BeliefDataset(Dataset):
         belief_distributions: np.ndarray of shape (n_data_points, distr_size)
         """
         
+        # print(game_histories.shape)
+        # print(game_histories[3450][2])
+        # assert False
+        
         assert game_histories.shape[0] == belief_distributions.shape[0]
         self.game_histories = game_histories
         self.belief_distributions = belief_distributions
