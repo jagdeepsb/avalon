@@ -75,15 +75,7 @@ class Belief:
         Get the marginal probability of a given role assignment under this belief distribution.
         """
         
-        def is_match(assignment: Tuple[Role]) -> bool:
-            for r1, r2 in zip(role_assignment, assignment):
-                if r1 == Role.UNKNOWN: # catch all
-                    continue
-                if r1 != r2:
-                    return False
-            return True
-        
-        return sum([p for p, assignment in zip(self.probabilities, self.all_assignments) if is_match(assignment)])
+        return sum([p for p, assignment in zip(self.probabilities, self.all_assignments) if self._is_match(role_assignment, list(assignment))])
     
     def get_top_k_assignments(self, k: int) -> List[Tuple[Role, float]]:
         """
@@ -92,6 +84,38 @@ class Belief:
         
         sorted_indices = np.argsort(self.probabilities)[::-1]
         return [(self.all_assignments[i], self.probabilities[i]) for i in sorted_indices[:k]]
+    
+    def condition_on(self, role_assignment: List[Role]) -> Belief:
+        """
+        Condition this belief on a given role assignment.
+        """
+        
+        # zero out all probabilities that don't match the given role assignment
+        new_probabilities = np.zeros_like(self.probabilities)
+        for i, assignment in enumerate(self.all_assignments):
+            if self._is_match(role_assignment, list(assignment)):
+                new_probabilities[i] = self.probabilities[i]
+        # normalize
+        new_probabilities /= new_probabilities.sum()
+        return Belief(self.all_assignments, new_probabilities)
+    
+    def _is_match(self, a1: List[Role], a2: List[Role]) -> bool:
+            for r1, r2 in zip(a1, a2):
+                if r1 == Role.UNKNOWN or r2 == Role.UNKNOWN: # catch all
+                    continue
+                if r1 != r2:
+                    return False
+            return True
+        
+    @classmethod
+    def make_uniform(cls, role_assignment: List[Role]) -> Belief:
+        """
+        Create a uniform distribution over all possible role assignments.
+        """
+        
+        all_assignments = all_possible_ordered_role_assignments(role_assignment)
+        distribution = np.ones(len(all_assignments)) / len(all_assignments)
+        return cls(all_assignments, distribution)
         
     @classmethod
     def trivial_distribution(cls, role_assignment: List[Role]) -> Belief:
@@ -110,7 +134,7 @@ class Belief:
         return cls(all_assignments, distribution)
     
     @classmethod
-    def smoothed_triangle_distribution(cls, role_assignment: List[Role]) -> Belief:
+    def smoothed_trivial_distribution(cls, role_assignment: List[Role]) -> Belief:
         """
         Create a smoothed distribution where the probability mass for each role assignment is proportional
         to some monotonic function of how many roles match the given role assignment.

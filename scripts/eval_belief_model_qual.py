@@ -12,7 +12,7 @@ from src.utils.constants import (
 )
 from src.game.game_state import AvalonGameState
 from src.models.belief_predictor import BeliefPredictor
-from src.game.beliefs import all_possible_ordered_role_assignments
+from src.game.beliefs import all_possible_ordered_role_assignments, Belief
 from src.players.mimic_player import get_mimic_player_factory
 from src.game.simulator import AvalonSimulator
 
@@ -62,12 +62,21 @@ class PrintBeliefsSimulator(AvalonSimulator):
         the perspective of the player with the given index.
         """
         
+        belief_role_assignments = all_possible_ordered_role_assignments(self.game_state.player_assignments)
         while self.game_state.game_stage not in [GameStage.RESISTANCE_WIN, GameStage.SPY_WIN]:
             self.step()
             obs = self.game_state.game_state_obs(from_perspective_of_player_index=player_index)
             # obs = self.game_state.game_state_obs()
-            beliefs = softmax(belief_model(torch.tensor(obs).float().unsqueeze(0))).detach().numpy()[0]
-            print_useful_belief_information(self.game_state.player_assignments, beliefs)
+            beliefs_probs = softmax(belief_model(torch.tensor(obs).float().unsqueeze(0))).detach().numpy()[0]
+            
+            # condition on the fact that the player is resistance
+            belief = Belief(belief_role_assignments, beliefs_probs).condition_on(
+                [Role.RESISTANCE if i == player_index else Role.UNKNOWN for i in range(len(self.game_state.player_assignments))]
+            )
+            
+            print_useful_belief_information(self.game_state.player_assignments, beliefs_probs)
+            
+            
         return self.game_state
     
 def run_game_from_perspective(
@@ -91,7 +100,8 @@ def run_game_from_perspective(
 if __name__ == "__main__":
     
     # EXPERIMENT_NAME = "belief_tf_16_30_10"
-    EXPERIMENT_NAME = "belief_debug_16_30_10"
+    # EXPERIMENT_NAME = "belief_debug_16_30_10"
+    EXPERIMENT_NAME = "res_belief_16_30_10"
 
     # Load Games
     EVAL_GAMES_PATH = os.path.join(DATA_DIR, "games_val.json")
@@ -106,7 +116,7 @@ if __name__ == "__main__":
     model.eval()
     
     # Run a single game from each players perspective
-    game_idx = 0
+    game_idx = 1
     for player_idx in range(len(eval_game_states[game_idx].player_assignments)):
         print(f"\n\n=========================\n==== Player Index: {player_idx} ====\n=========================\n\n")
         game_state = eval_game_states[game_idx]

@@ -43,8 +43,13 @@ def validate(model: BeliefPredictor, val_dataset: BeliefDataset) -> float:
 
 if __name__ == "__main__":
     
-    EXPERIMENT_NAME = "belief_debug_16_30_10"
-    is_spy = False
+    EXPERIMENT_NAME = "spy_belief_16_30_10"
+    is_spy = True
+    
+    # Dirs
+    if not os.path.exists(MODELS_DIR):
+        os.makedirs(MODELS_DIR)
+    model_save_path = os.path.join(MODELS_DIR, f"{EXPERIMENT_NAME}.pt")
     
     # Problem spec
     roles = [
@@ -90,6 +95,7 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     n_epochs = 25
     
+    lowest_val_loss = float("inf")
     for epoch in range(n_epochs):
         avg_loss = 0
         for i, (x, y) in enumerate(train_loader):
@@ -99,14 +105,14 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
             avg_loss += loss.item()
+            
         validation_loss = validate(model, val_dataset)
+        if validation_loss < lowest_val_loss:
+            lowest_val_loss = validation_loss
+            torch.save(model, model_save_path)
+        
         print(f"Epoch {epoch}: Avg Loss {avg_loss / len(train_loader)} Validation Loss {validation_loss}")
         
-    # Save model
-    model_save_path = os.path.join(MODELS_DIR, f"{EXPERIMENT_NAME}.pt")
-    if not os.path.exists(MODELS_DIR):
-        os.makedirs(MODELS_DIR)
-    torch.save(model, model_save_path)
-        
     # Validate
-    print(f"Validation Loss: {validate(model, val_dataset)}")
+    # print(f"Validation Loss: {validate(model, val_dataset)}")
+    print(f"Lowest Validation Loss: {lowest_val_loss}")

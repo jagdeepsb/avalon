@@ -272,13 +272,28 @@ class AvalonGameState:
             player_roles_expanded
         ], axis=2) # (n_players, max_rounds, 7 + Role.one_hot_dim())
         
-    def ground_truth_role_distribution(self,) -> np.ndarray:
-        # return Belief.trivial_distribution(
-        #     self.player_assignments
-        # ).distribution
-        return Belief.smoothed_triangle_distribution(
+    def ground_truth_belief_distribution(self,) -> np.ndarray:
+        return Belief.trivial_distribution(
             self.player_assignments
         ).distribution
+        
+    def get_trainable_belief_distribution(self, player_index: int, constrained: bool = False) -> np.ndarray:
+        role = self.player_assignments[player_index]
+    
+        if not constrained:
+            return Belief.smoothed_trivial_distribution(self.player_assignments).distribution
+    
+        if role == Role.SPY:
+            # smoothed distribution over all assignments conditioned on knowing who all the spies are
+            return Belief.smoothed_trivial_distribution(self.player_assignments).condition_on(
+                [Role.SPY if role == Role.SPY else Role.UNKNOWN for role in self.player_assignments]
+            ).distribution
+        if role == Role.RESISTANCE:
+            # smoothed distribution over all assignments conditioned on knowing you are resistance
+            return Belief.smoothed_trivial_distribution(self.player_assignments).condition_on(
+                [Role.RESISTANCE if i == player_index else Role.UNKNOWN for i in range(len(self.player_assignments))]
+            ).distribution
+        raise ValueError(f"Player {player_index} is not a spy or resistance, training not supported")
     
     #########################
     # Game History As Numpy #

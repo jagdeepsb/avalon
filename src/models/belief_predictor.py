@@ -119,38 +119,25 @@ class BeliefPredictor(nn.Module):
         self.positional_encoding_for_players = getPositionEncoding(n_players, encoding_dim)
         self.positional_encoding_for_history = getPositionEncoding(n_history_length, encoding_dim)
         
+        self.round_convs = nn.ModuleList([
+            nn.Conv2d(
+                in_channels=encoding_dim,
+                out_channels=encoding_dim,
+                kernel_size=(n_players, 1),
+                stride=(1, 1),
+                padding=(0, 0),
+            ) for _ in range(4)
+        ])
         
-        self.round_conv_1 = nn.Conv2d(
-            in_channels=encoding_dim,
-            out_channels=encoding_dim,
-            kernel_size=(n_players, 1),
-            stride=(1, 1),
-            padding=(0, 0),
-        )
-        
-        self.round_conv_2 = nn.Conv2d(
-            in_channels=encoding_dim,
-            out_channels=encoding_dim,
-            kernel_size=(n_players, 1),
-            stride=(1, 1),
-            padding=(0, 0),
-        )
-        
-        self.player_conv_1 = nn.Conv2d(
-            in_channels=encoding_dim,
-            out_channels=encoding_dim,
-            kernel_size=(1, n_history_length),
-            stride=(1, 1),
-            padding=(0, 0),
-        )
-        
-        self.player_conv_2 = nn.Conv2d(
-            in_channels=encoding_dim,
-            out_channels=encoding_dim,
-            kernel_size=(1, n_history_length),
-            stride=(1, 1),
-            padding=(0, 0),
-        )
+        self.player_convs = nn.ModuleList([
+            nn.Conv2d(
+                in_channels=encoding_dim,
+                out_channels=encoding_dim,
+                kernel_size=(1, n_history_length),
+                stride=(1, 1),
+                padding=(0, 0),
+            ) for _ in range(4)
+        ])
         
         self.relu = nn.ReLU()
         
@@ -162,6 +149,11 @@ class BeliefPredictor(nn.Module):
         Input shape: (batch_size, n_players, n_history, feature_dim)
         """
         
+        if x.device != self.positional_encoding_for_players.device:
+            self.positional_encoding_for_players = self.positional_encoding_for_players.to(x.device)
+        if x.device != self.positional_encoding_for_history.device:
+            self.positional_encoding_for_history = self.positional_encoding_for_history.to(x.device)
+        
         # encoding
         out = Rearrange("b n_players n_history d -> b d n_players n_history")(x)
         out = self.encoding_conv(out)
@@ -169,19 +161,16 @@ class BeliefPredictor(nn.Module):
         out = out + self.positional_encoding_for_players
         out = Rearrange("b n_history n_players d -> b n_players n_history d")(out)
         out = out + self.positional_encoding_for_history
-        x_1 = Rearrange("b n_players n_history d -> b d n_players n_history")(out)
+        x_save = Rearrange("b n_players n_history d -> b d n_players n_history")(out)
         
         # operations
-        out = self.round_conv_1(x_1)
-        x_2 = self.relu(out) + x_1 # residual connection
-        out = self.player_conv_1(x_2)
-        x_3 = self.relu(out) + x_2 # residual connection
-        out = self.round_conv_2(x_3)
-        x_4 = self.relu(out) + x_3 # residual connection
-        out = self.player_conv_2(x_4)
-        x_5 = self.relu(out) + x_4 # residual connection
+        for round_conv, player_conv in zip(self.round_convs, self.player_convs):
+            out = round_conv(x_save)
+            x_save = self.relu(out) + x_save # residual connection
+            out = player_conv(x_save)
+            x_save = self.relu(out) + x_save # residual connection
         
-        out = torch.einsum("bdph->bdp", x_5)
+        out = torch.einsum("bdph->bdp", x_save)
         
         # decoding
         out = nn.Flatten()(out)

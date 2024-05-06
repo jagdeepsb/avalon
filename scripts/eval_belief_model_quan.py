@@ -16,6 +16,7 @@ from src.models.belief_predictor import BeliefPredictor
 from src.game.beliefs import Belief, all_possible_ordered_role_assignments
 from src.players.mimic_player import get_mimic_player_factory
 from src.game.simulator import AvalonSimulator
+from src.players.stupid_hardcoded_player import stupid_hardcoded_player_factory
 
 def assignment_to_str(assignment: List[Role]) -> str:
     """
@@ -52,8 +53,24 @@ class BeliefsSimulator(AvalonSimulator):
         while self.game_state.game_stage not in [GameStage.RESISTANCE_WIN, GameStage.SPY_WIN]:
             self.step()
             obs = self.game_state.game_state_obs(from_perspective_of_player_index=player_index)
-            beliefs_probs = softmax(belief_model(torch.tensor(obs).float().unsqueeze(0))).detach().numpy()[0]    
-            beliefs.append(Belief(belief_role_assignments, beliefs_probs))
+            beliefs_probs = softmax(belief_model(torch.tensor(obs).float().unsqueeze(0))).detach().numpy()[0]
+            
+            # beliefs_probs = Belief.make_uniform(self.game_state.player_assignments).distribution + np.random.normal(0, 0.01, len(belief_role_assignments))
+            
+            # condition on the fact that the player is resistance
+            # belief = Belief(belief_role_assignments, beliefs_probs).condition_on(
+            #     [Role.RESISTANCE if i == player_index else Role.UNKNOWN for i in range(len(self.game_state.player_assignments))]
+            # )
+            
+            # condition on the fact that you know who the spies are
+            belief = Belief(belief_role_assignments, beliefs_probs).condition_on(
+                [Role.SPY if role == Role.SPY else Role.UNKNOWN for role in self.game_state.player_assignments]
+            )
+            
+            # from src.utils.belief_from_models import get_belief_for_player
+            # belief = get_belief_for_player(self.game_state, player_index, torch.device("cpu"))
+            
+            beliefs.append(belief)
                  
         return self.game_state, beliefs
     
@@ -69,7 +86,7 @@ def get_belief_score(belief: Belief, role_assignment: List[Role]) -> float:
     # return np.mean(total_scores)
     
     # return 1 if belief is in top 3
-    top_assignments = belief.get_top_k_assignments(3)
+    top_assignments = belief.get_top_k_assignments(1)
     for assignment, _ in top_assignments:
         if assignment == tuple(role_assignment):
             return 1
@@ -152,19 +169,36 @@ def run_game_from_perspective(
     )
     final_game_state, beliefs = simulator.run_to_completion(belief_model, player_index)
     return final_game_state, beliefs
+
+def get_final_game_state(n: int) -> List[AvalonGameState]:
+    game_states = []
+    for i in tqdm(range(n)):
+        simulator = AvalonSimulator(
+            [Role.MERLIN, Role.RESISTANCE, Role.RESISTANCE, Role.SPY, Role.SPY],
+            stupid_hardcoded_player_factory,
+            randomize_player_assignments=True,
+            verbose=False
+        )
+        final_game_state = simulator.run_to_completion()
+        game_states.append(final_game_state)
+    return game_states
     
 if __name__ == "__main__":
     
     # EXPERIMENT_NAME = "belief_tf_16_30_10"
     # EXPERIMENT_NAME = "belief_simple_16_30_10"
-    EXPERIMENT_NAME = "belief_debug_16_30_10"
+    # EXPERIMENT_NAME = "belief_debug_16_30_10"
+    # EXPERIMENT_NAME = "res_belief_16_30_10"
+    EXPERIMENT_NAME = "spy_belief_16_30_10"
     
     # Load Games
-    # EVAL_GAMES_PATH = os.path.join(DATA_DIR, "games_val.json")
+    EVAL_GAMES_PATH = os.path.join(DATA_DIR, "games_val.json")
     # EVAL_GAMES_PATH = os.path.join(DATA_DIR, "games_train.json")
     with open(EVAL_GAMES_PATH, "r") as f:
         eval_games = json.load(f)
     eval_game_states = [AvalonGameState.from_json(game) for game in eval_games][:200]
+    
+    # eval_game_states = get_final_game_state(100)
     
     # Load model
     model_path = os.path.join(MODELS_DIR, f"{EXPERIMENT_NAME}.pt")
