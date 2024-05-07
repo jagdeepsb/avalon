@@ -6,3 +6,4 @@ tqdm
 torch-summary
 einops
 torchinfo
+seaborn
