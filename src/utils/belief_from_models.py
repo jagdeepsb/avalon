@@ -45,6 +45,9 @@ def get_belief_for_player(game_state: AvalonGameState, player_index: int, device
             [Role.RESISTANCE if i == player_index else Role.UNKNOWN for i in range(len(game_state.player_assignments))]
         )
         
+        # rule out impossible role assignments given the quest history
+        belief = belief.condition_on_quest_history(game_state.quest_teams, game_state.quest_votes)
+        
     elif role == Role.SPY:
         obs = game_state.game_state_obs(from_perspective_of_player_index=player_index)
         obs = torch.tensor(obs).float().unsqueeze(0).to(device)

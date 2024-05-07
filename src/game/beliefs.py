@@ -3,7 +3,7 @@ from typing import List, Tuple, Dict, Set
 from itertools import permutations
 import numpy as np
 
-from src.game.utils import Role
+from src.game.utils import Role, QuestVote
 
 ALL_ROLE_ASSIGNMENTS_CACHE: Dict[Tuple[Role], List[Tuple[Role]]] = {}
 
@@ -99,6 +99,24 @@ class Belief:
         new_probabilities /= new_probabilities.sum()
         return Belief(self.all_assignments, new_probabilities)
     
+    def condition_on_quest_history(self, quest_teams: List[List[int]], quest_votes: List[List[QuestVote]]) -> Belief:
+        
+        def assignment_possible_given_quests(assignment: Tuple[Role]):
+            for q_team, q_votes in zip(quest_teams, quest_votes):
+                n_fails = sum([1 if v == QuestVote.FAIL else 0 for v in q_votes])
+                n_spies = sum([1 if assignment[i] == Role.SPY else 0 for i in q_team])
+                if n_fails > n_spies:
+                    return False
+            return True
+        
+        new_probabilities = self.probabilities.copy()
+        for i, assignment in enumerate(self.all_assignments):
+            if not assignment_possible_given_quests(assignment):
+                new_probabilities[i] = 0
+        new_probabilities /= new_probabilities.sum()
+        return Belief(self.all_assignments, new_probabilities)
+        
+        
     def _is_match(self, a1: List[Role], a2: List[Role]) -> bool:
             for r1, r2 in zip(a1, a2):
                 if r1 == Role.UNKNOWN or r2 == Role.UNKNOWN: # catch all
