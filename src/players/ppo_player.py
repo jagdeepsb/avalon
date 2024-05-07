@@ -16,56 +16,57 @@ from src.game.utils import (
 )
 from src.game.game_state import AvalonGameState
 from src.players.player import AvalonPlayer
+from src.models.ac_models import ActorCriticModel
+from src.models.belief_predictor import BeliefPredictor
+from src.game.utils import (
+    Role, QuestResult, RoundStage, GameStage
+)
     
-class PPOAvalonPlayer(AvalonPlayer, nn.Module):
+class PPOAvalonPlayer(AvalonPlayer):
     """
     Player trained using PPO
     """
 
-    def __init__(self, role: Role, index: int, actor_policy_class: nn.Module, critic_policy_class: nn.Module, env: gym.env) -> None:
+    def __init__(self, role: Role, index: int, belief_model: BeliefPredictor, env: gym.env) -> None:
         super().__init__(role, index)
-        # TODO: Implement multiple actor policy networks (e.g. picking merlin, team proposal, quest vote, etc.)
-        self.actor = actor_policy_class()
-        self.critic = critic_policy_class()
+        self.actor_critic = ActorCriticModel(belief_model, role, index)
         self.env = env
+    
+    def get_action(self, obs: AvalonGameState):
+        if obs.game_stage == GameStage.MERLIN_VOTE:
+            return self.guess_merlin(obs)
+        elif obs.round_stage == RoundStage.TEAM_PROPOSAL:
+            return self.get_team_proposal(obs)
+        elif obs.round_stage == RoundStage.TEAM_VOTE:
+            return self.get_team_vote(obs)
+        elif obs.round_stage == RoundStage.QUEST_VOTE:
+            return self.get_quest_vote(obs)
 
     def get_team_proposal(self, game_state: AvalonGameState) -> List[int]:
-        logits = self.actor(game_state)
-        probs = Categorical(logits=logits)
-        if action is None:
-            action = probs.sample()
-        return action
+        # return indices of top self.team_size players from dist
+        dist, _ = self.forward(game_state)
+        return torch.topk(dist.probs, game_state.team_size).indices
     
     def get_team_vote(self, game_state: AvalonGameState) -> TeamVote:
-        logits = self.actor(game_state)
-        probs = Categorical(logits=logits)
-        if action is None:
-            action = probs.sample()
-        return action
+        dist, _ = self.forward(game_state)
+        return torch.argmax(dist.probs)
     
     def get_quest_vote(self, game_state: AvalonGameState) -> QuestVote:
-        logits = self.actor(game_state)
-        probs = Categorical(logits=logits)
-        if action is None:
-            action = probs.sample()
-        return action
+        dist, _ = self.forward(game_state)
+        return torch.argmax(dist.probs)
     
     def guess_merlin(self, game_state: AvalonGameState) -> int:
-        logits = self.actor(game_state)
-        probs = Categorical(logits=logits)
-        if action is None:
-            action = probs.sample()
-        return action
-    
+        dist, _ = self.forward(game_state)
+        return torch.argmax(dist.probs)
+
     def get_value(self, x):
-        return self.critic(x)
+        _, values =  self.actor_critic.forward(x)
+        return values
 
     def get_action_and_value(self, x, action=None):
-        logits = self.actor(x)
-        probs = Categorical(logits=logits)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+        dist, values = self.actor_critic.forward(x)
+        action = self.get_action(x)
+        return action, dist.log_prob(action), dist.entropy(), values
 
     def train(self, n_iters: int):
         args = tyro.cli(Args)
