@@ -74,7 +74,7 @@ class AvalonEnv(gym.Env):
         self.game_state.reset(self.randomize_player_assignments)
         return self.game_state
 
-    def step(self, action):
+    def step(self, action: List[int]):
         """
         The action method where the game dynamics are implemented
         """
@@ -102,7 +102,7 @@ class AvalonEnv(gym.Env):
                 reward = 1.0
         return self.game_state, reward, done, info
 
-    def _team_proposal_step(self, action) -> None:
+    def _team_proposal_step(self, action: List[int]) -> None:
         if self.game_state.leader_index != self.agent_index:
             leader = self.players[self.game_state.leader_index]
             team = leader.get_team_proposal(self.game_state)
@@ -111,7 +111,7 @@ class AvalonEnv(gym.Env):
             team = action
             self.game_state.propose_team(team)
         
-    def _team_vote_step(self, action) -> None:
+    def _team_vote_step(self, action: List[int]) -> None:
         team_votes = []
         for i in range(self.num_players):
             if i != self.agent_index:
@@ -120,7 +120,7 @@ class AvalonEnv(gym.Env):
                 team_votes.append(action)
         self.game_state.vote_on_team(team_votes)
         
-    def _quest_vote_step(self, action) -> None:
+    def _quest_vote_step(self, action: List[int]) -> None:
         quest_team = self.game_state.quest_teams[self.game_state.quest_num]
         quest_votes = []
         if self.agent_index not in quest_team:

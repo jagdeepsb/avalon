@@ -93,7 +93,6 @@ class AvalonGameState:
         - Round must be in the TEAM_PROPOSAL stage
         - The team must be valid
         """
-        
         # Check if game is in the correct stage and the team is valid
         if self.game_stage != GameStage.IN_PROGRESS:
             raise ValueError(f"Cannot propose team when in stage {self.game_stage}")

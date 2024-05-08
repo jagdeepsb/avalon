@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Tuple
 import random
 import torch
 import torch.nn as nn
@@ -9,6 +9,9 @@ import torch.optim as optim
 import numpy as np
 import tyro
 import time
+import os
+from itertools import combinations
+import math
 
 
 from src.game.utils import (
@@ -27,7 +30,7 @@ class PPOAvalonPlayer(AvalonPlayer):
     Player trained using PPO
     """
 
-    def __init__(self, role: Role, index: int, belief_model: BeliefPredictor, env: gym.env) -> None:
+    def __init__(self, role: Role, index: int, belief_model: BeliefPredictor, env: gym.Env) -> None:
         super().__init__(role, index)
         self.actor_critic = ActorCriticModel(belief_model, role, index)
         self.env = env
@@ -43,36 +46,71 @@ class PPOAvalonPlayer(AvalonPlayer):
             return self.get_quest_vote(obs)
 
     def get_team_proposal(self, game_state: AvalonGameState) -> List[int]:
-        # return indices of top self.team_size players from dist
-        dist, _ = self.forward(game_state)
-        return torch.topk(dist.probs, game_state.team_size).indices
+        return self.get_team_proposal_and_dist(game_state)[0]
     
     def get_team_vote(self, game_state: AvalonGameState) -> TeamVote:
-        dist, _ = self.forward(game_state)
-        return torch.argmax(dist.probs)
+        return self.get_team_vote_and_dist(game_state)[0]
     
     def get_quest_vote(self, game_state: AvalonGameState) -> QuestVote:
-        dist, _ = self.forward(game_state)
-        return torch.argmax(dist.probs)
+        return self.get_quest_vote_and_dist(game_state)[0]
     
     def guess_merlin(self, game_state: AvalonGameState) -> int:
-        dist, _ = self.forward(game_state)
-        return torch.argmax(dist.probs)
+        return self.guess_merlin_and_dist(game_state)[0]
 
-    def get_value(self, x):
-        _, values =  self.actor_critic.forward(x)
+    def get_team_proposal_and_dist(self, game_state: AvalonGameState) -> Tuple[List[int], Categorical]:
+        # return indices of top self.team_size players from dist
+        dist, _ = self.actor_critic.forward(game_state)
+        top_k_probs, top_k_indices = torch.topk(dist.probs, game_state.team_size)
+        top_k_logits = torch.log(top_k_probs)
+        comb_indices = list(combinations(range(len(dist.probs)), game_state.team_size))
+        scores = torch.tensor([dist.probs[list(indices)].sum() for indices in comb_indices])
+        probabilities = torch.softmax(scores, dim=0)
+        combination_logits = torch.log(probabilities + 1e-9)  
+        max_score, max_index = torch.max(scores, dim=0)
+        best_combination = list(comb_indices[max_index])
+        return best_combination, Categorical(logits=combination_logits)
+    
+    def get_team_vote_and_dist(self, game_state: AvalonGameState) -> Tuple[TeamVote, Categorical]:
+        dist, _ = self.actor_critic.forward(game_state)
+        return torch.argmax(dist.probs).tolist(), dist
+    
+    def get_quest_vote_and_dist(self, game_state: AvalonGameState) -> Tuple[QuestVote, Categorical]:
+        dist, _ = self.actor_critic.forward(game_state)
+        return torch.argmax(dist.probs).tolist(), dist
+    
+    def guess_merlin_and_dist(self, game_state: AvalonGameState) -> Tuple[int, Categorical]:
+        dist, _ = self.actor_critic.forward(game_state)
+        return torch.argmax(dist.probs).item(), dist
+
+    def get_action_probs_and_value(self, obs: AvalonGameState):
+        x = self.actor_critic.format_observation(obs)
+        _, values =  self.actor_critic.forward(obs)
+        log_prob = None
+        if obs.game_stage == GameStage.MERLIN_VOTE:
+            action, dist = self.guess_merlin_and_dist(obs)
+            log_prob = dist.log_prob(torch.tensor(action))
+        elif obs.round_stage == RoundStage.TEAM_PROPOSAL:
+            action, dist = self.get_team_proposal_and_dist(obs)
+            selected_logits = dist.logits[action]
+            log_prob = selected_logits.sum()
+        elif obs.round_stage == RoundStage.TEAM_VOTE:
+            action, dist = self.get_team_vote_and_dist(obs)
+            log_prob = dist.log_prob(torch.tensor(action))
+        elif obs.round_stage == RoundStage.QUEST_VOTE:
+            action, dist = self.get_quest_vote_and_dist(obs)
+            log_prob = dist.log_prob(torch.tensor(action))
+        return action, log_prob, values
+    
+    def get_value(self, obs: AvalonGameState):
+        _, _, values = self.get_action_probs_and_value(obs)
         return values
-
-    def get_action_and_value(self, x, action=None):
-        dist, values = self.actor_critic.forward(x)
-        action = self.get_action(x)
-        return action, dist.log_prob(action), dist.entropy(), values
+        
 
     def train(self, n_iters: int):
         args = tyro.cli(Args)
         device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-        optimizer = optim.Adam(self.parameters(), lr=args.learning_rate, eps=1e-5)
+        optimizer = optim.Adam(self.actor_critic.parameters(), lr=args.learning_rate, eps=1e-5)
 
         obs = torch.zeros((args.num_steps, args.num_envs) + self.single_observation_space.shape).to(device)
         actions = torch.zeros((args.num_steps, args.num_envs) + self.env.single_action_space.shape).to(device)

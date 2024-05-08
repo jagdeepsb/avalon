@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from src.game.game_state import AvalonGameState
 from src.models.belief_predictor import BeliefPredictor
-from src.game.beliefs import all_role_assignments
+from src.game.beliefs import all_possible_ordered_role_assignments
 from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
 from torch.nn.functional import softmax
@@ -10,6 +10,8 @@ from src.game.utils import (
     Role, QuestResult, RoundStage, GameStage
 )
 import numpy as np
+from itertools import combinations
+import math
 
 # Function from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr/blob/master/model.py
 def init_params(m):
@@ -115,21 +117,21 @@ class ActorCriticModel(nn.Module):
 
         # Define critic models
         self.team_proposal_critic = nn.Sequential(
-            nn.Linear(40, 64),
+            nn.Linear(5, 64),
             nn.ReLU(), 
             nn.Linear(64, 64),
             nn.Tanh(),
             nn.Linear(64, 1)
         )
         self.team_vote_critic = nn.Sequential(
-            nn.Linear(50, 64),
+            nn.Linear(2, 64),
             nn.ReLU(), 
             nn.Linear(64, 64),
             nn.Tanh(),
             nn.Linear(64, 1)
         )
         self.quest_vote_critic = nn.Sequential(
-            nn.Linear(45, 64),
+            nn.Linear(2, 64),
             nn.ReLU(), 
             nn.Linear(64, 64),
             nn.Tanh(),
@@ -155,7 +157,7 @@ class ActorCriticModel(nn.Module):
             The distribution of actions from policy. A Categorical distribution
             for discreet action spaces.
         """
-        obs_in = self.format_observation(obs=obs)
+        obs_in = self.format_observation(obs=obs).float()
 
         dist, value = None, None
 
@@ -169,24 +171,24 @@ class ActorCriticModel(nn.Module):
                 Role.SPY,
                 Role.SPY,
             ]
-            role_assignment = all_role_assignments(roles)[top_belief_ind]
-            merlin = role_assignment[0]
+            role_assignment = all_possible_ordered_role_assignments(roles)[top_belief_ind]
+            merlin_index = role_assignment.index(Role.MERLIN)
             x = torch.zeros(5)
-            x[merlin] = 1
+            x[merlin_index] = 1
             dist = Categorical(x)
             value = torch.tensor([0])
         if obs.round_stage == RoundStage.TEAM_PROPOSAL:
             x = self.team_proposal_actor(obs_in)
-            dist = Categorical(logits=F.log_softmax(x, dim=1))
-            value = self.team_proposal_critic(x).squeeze(1)
+            dist = Categorical(logits=F.log_softmax(x, dim=0))
+            value = self.team_proposal_critic(x)
         if obs.round_stage == RoundStage.TEAM_VOTE:
             x = self.team_vote_actor(obs_in)
-            dist = Categorical(logits=F.log_softmax(x, dim=1))
-            value = self.team_vote_critic(x).squeeze(1)
+            dist = Categorical(logits=F.log_softmax(x, dim=0))
+            value = self.team_vote_critic(x)
         if obs.round_stage == RoundStage.QUEST_VOTE:
             x = self.quest_vote_actor(obs_in)
-            dist = Categorical(logits=F.log_softmax(x, dim=1))
-            value = self.quest_vote_critic(x).squeeze(1)
+            dist = Categorical(logits=F.log_softmax(x, dim=0))
+            value = self.quest_vote_critic(x)
 
         return dist, value
 
@@ -195,26 +197,30 @@ class ActorCriticModel(nn.Module):
         role_inds = {Role.MERLIN: 0, Role.RESISTANCE: 1, Role.SPY: 2}
         role[role_inds[self.role]] = 1
         
+        """
         historical_obs = obs.game_state_obs(from_perspective_of_player_index=self.index)
         beliefs = softmax(self.belief_model(torch.tensor(historical_obs).float().unsqueeze(0)))[0]
+        """
+        beliefs = softmax(torch.tensor(self.belief_model(obs)), dim = 0)
 
         leader = torch.zeros(5)
         leader[obs.leader_index] = 1
 
-        team_inds = obs.teams[-1]
         team = torch.zeros(5)
-        team[team_inds] = 1
+        if obs.round_stage == RoundStage.TEAM_VOTE or obs.round_stage == RoundStage.QUEST_VOTE:
+            team_inds = obs.teams[-1]
+            team[team_inds] = 1
 
-        r_wins_progress = torch.from_numpy([np.count_nonzero(obs.quest_results == QuestResult.SUCCEEDED) / 3])
-        s_wins_progress = torch.from_numpy([np.count_nonzero(obs.quest_results == QuestResult.FAILED) / 3])
+        r_wins_progress = torch.tensor([np.count_nonzero(obs.quest_results == QuestResult.SUCCEEDED) / 3])
+        s_wins_progress = torch.tensor([np.count_nonzero(obs.quest_results == QuestResult.FAILED) / 3])
         
         quest_num = torch.zeros(5)
         quest_num[obs.quest_num] = 1
 
         turns_until_hammer = torch.zeros(5)
-        for i in range(obs.turns_until_hammer):
+        for i in range(obs.turns_until_hammer[0]):
             turns_until_hammer[(obs.leader_index + i) % 5] = i + 1
-        turns_until_hammer = softmax(turns_until_hammer)
+        turns_until_hammer = softmax(turns_until_hammer, dim = 0)
 
         formatted_obs = None
         if obs.game_stage == GameStage.MERLIN_VOTE:
@@ -247,4 +253,43 @@ class ActorCriticModel(nn.Module):
                                 s_wins_progress
                             ])
         
-        return formatted_obs
+        return formatted_obs.to(torch.float32)
+    
+
+    def evaluate_actions(self, states, actions):
+        """
+        Evaluate the actions taken by the policy given the states.
+
+        Parameters:
+        - states: list of torch.Tensor
+            List of states, each represented as a torch.Tensor
+        - actions: list of torch.Tensor
+            List of actions, each represented as a torch.Tensor
+
+        Returns:
+        - log_probs: torch.Tensor
+            Log probabilities of the actions taken by the policy
+        - state_values: torch.Tensor
+            Estimated state values for the given states
+        - dist_entropy: torch.Tensor
+            Entropy of the action distribution
+        """
+        log_probs = []
+        state_values = []
+        dist_entropy = 0
+
+        for state, action in zip(states, actions):
+            dist, value = self.forward(state)
+            action_tensor = torch.tensor(action)
+
+            if state.round_stage == RoundStage.TEAM_PROPOSAL:
+                selected_logits = dist.logits[action]
+                action_log_prob = selected_logits.sum()
+            else:
+                action_log_prob = dist.log_prob(action_tensor)
+            log_probs.append(action_log_prob.view(1))
+            state_values.append(value)
+
+            dist_entropy += dist.entropy().mean()
+        
+        return torch.cat(log_probs), torch.cat(state_values), dist_entropy

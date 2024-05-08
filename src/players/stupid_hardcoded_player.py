@@ -78,6 +78,8 @@ class StupidHardcodedSpy(AvalonPlayer):
         non_spy_indices = [
             i for i, role in enumerate(player_assignments) if role != Role.SPY
         ]
+        if self.index in non_spy_indices:
+            non_spy_indices.remove(self.index)
         team = [self.index] + random.sample(non_spy_indices, game_state.team_size - 1)
         return team
     
