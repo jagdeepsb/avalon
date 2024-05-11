@@ -78,7 +78,6 @@ class AvalonEnv(gym.Env):
             randomize_player_assignments=False, 
             verbose=self.verbose
         )
-        print(self.game_state.player_assignments)
         return self.game_state
 
     def step(self, action: List[int]):
