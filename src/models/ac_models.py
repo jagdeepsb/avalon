@@ -9,6 +9,7 @@ from torch.nn.functional import softmax
 from src.game.utils import (
     Role, QuestResult, RoundStage, GameStage
 )
+from src.game.utils import assignment_to_str
 import numpy as np
 from itertools import combinations
 import math
@@ -162,7 +163,14 @@ class ActorCriticModel(nn.Module):
         dist, value = None, None
 
         if obs.game_stage == GameStage.MERLIN_VOTE:
-            top_belief_ind = torch.argmax(obs_in)
+            # top_belief_ind = torch.argmax(obs_in)
+            
+            # TODO: THIS IS A HACK YELL AT DEEPS TO FIX THIS
+            from src.utils.belief_from_models import get_belief_for_player_cheap
+            beliefs = get_belief_for_player_cheap(obs, self.index, 'cpu').distribution
+            beliefs = torch.tensor(beliefs)
+            top_belief_ind = torch.argmax(beliefs)
+            
             # Problem spec
             roles = [
                 Role.MERLIN,
@@ -201,7 +209,11 @@ class ActorCriticModel(nn.Module):
         historical_obs = obs.game_state_obs(from_perspective_of_player_index=self.index)
         beliefs = softmax(self.belief_model(torch.tensor(historical_obs).float().unsqueeze(0)))[0]
         """
-        beliefs = softmax(torch.tensor(self.belief_model(obs)), dim = 0)
+        # beliefs = softmax(torch.tensor(self.belief_model(obs)), dim = 0)
+        # TODO: THIS IS A HACK YELL AT DEEPS TO FIX THIS
+        from src.utils.belief_from_models import get_belief_for_player_cheap
+        beliefs = get_belief_for_player_cheap(obs, self.index, 'cpu').distribution
+        beliefs = torch.tensor(beliefs)
 
         leader = torch.zeros(5)
         leader[obs.leader_index] = 1

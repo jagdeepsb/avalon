@@ -65,3 +65,18 @@ ROLES_CAN_SEE: Dict[Role, List[Role]] = {
     Role.RESISTANCE: [],
     Role.SPY: [Role.SPY],
 }
+
+def assignment_to_str(assignment: Tuple[Role]) -> str:
+    out = []
+    for role in assignment:
+        if role == Role.RESISTANCE:
+            out.append("R")
+        elif role == Role.SPY:
+            out.append("S")
+        elif role == Role.MERLIN:
+            out.append("M")
+        elif role == Role.UNKNOWN:
+            out.append("?")
+        else:
+            raise ValueError(f"Unknown role {role}")
+    return "".join(out)
