@@ -3,6 +3,7 @@ import torch
 from torch import optim
 from torch.utils.data import DataLoader
 import numpy as np
+from typing import List, Callable, Tuple, Dict
 
 from src.game.utils import Role
 from src.models.ac_models import ActorCriticModel
@@ -22,6 +23,8 @@ from src.players.ppo_player import PPOAvalonPlayer
 from src.utils.belief_from_models import get_belief_for_player_cheap
 from torch.distributions import Categorical
 from src.game.game_state import AvalonGameState
+from src.players.player import AvalonPlayer
+from src.game.arena import AvalonArena
 from copy import deepcopy
 
 def compute_returns(rewards, gamma=0.99):
@@ -58,6 +61,30 @@ def ppo_step(policy, optimizer, states, actions, log_probs_old, returns, advanta
     optimizer.step()
     return loss.item()
 
+def validate(        
+        roles: List[Role],
+        ppo_player_factory: Callable[[Role], AvalonPlayer],
+        baseline_player_factory: Callable[[Role], AvalonPlayer],
+        num_games: int = 100
+    ) -> Tuple[Dict[Role, float], float]:
+    """
+    Run a series of games between two strategies and compute win rates:
+    
+    Returns
+    - win rates by role: Dict[Role, float]
+    - overall win rate: float
+    """
+    arena = AvalonArena(
+        roles=roles,
+        player_factory_1=ppo_player_factory,
+        player_factory_2=baseline_player_factory,
+        num_games=num_games,
+    )
+    ppo_win_rates_by_role = arena.get_win_rates_by_role()[0]
+    ppo_win_rate = arena.get_overall_win_rates()[0]
+    return ppo_win_rates_by_role, ppo_win_rate
+    
+
 class GroundTruthBeliefModel:
     def __init__(self, role: Role, index: int):
         self.role = role
@@ -72,7 +99,6 @@ if __name__ == "__main__":
     EXPERIMENT_NAME = "action_debug_16_30_10"
 
     # Config
-    is_spy = False
     roles = [
         Role.MERLIN,
         Role.RESISTANCE,
@@ -84,8 +110,6 @@ if __name__ == "__main__":
     index = np.random.choice(len(roles))
 
     # Setting up belief model
-    if role == Role.SPY:
-        is_spy = True
     n_classes = len(all_possible_ordered_role_assignments(roles))
 
     # Setting up env
@@ -96,8 +120,12 @@ if __name__ == "__main__":
 
     # Setting up action model
     action_model = ActorCriticModel(new_belief_model, role, index)
-    ppo_player = PPOAvalonPlayer(role, index, new_belief_model, env)
+    ppo_player = PPOAvalonPlayer(role, index, action_model, env)
     optimizer = optim.Adam(action_model.parameters(), lr=0.01)
+    
+    # For validation
+    def ppo_player_factory(role: Role, index: int) -> PPOAvalonPlayer:
+        return PPOAvalonPlayer(role, index, action_model, env)
 
     # Dummy game loop for demonstration
     states, actions, rewards = [], [], []
@@ -143,4 +171,10 @@ if __name__ == "__main__":
         advantages = torch.tensor(advantages)
         
         loss = ppo_step(action_model, optimizer, states, actions, log_probs_old, returns, advantages, clip_param)
-        print(f"Episode {episode + 1}, Loss: {loss:.5f}")
+        
+        if episode % 100 == 0:
+            win_rates_by_role, win_rate = validate(roles, ppo_player_factory, stupid_hardcoded_player_factory)
+            print(f"Episode {episode + 1}, Loss: {loss:.5f}, Win Rate: {win_rate:.5f}, Win Rates by Role: {win_rates_by_role}")
+        else:
+            print(f"Episode {episode + 1}, Loss: {loss:.5f}")
+        

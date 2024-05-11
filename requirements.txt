@@ -7,3 +7,4 @@ torch-summary
 einops
 torchinfo
 seaborn
+tyro

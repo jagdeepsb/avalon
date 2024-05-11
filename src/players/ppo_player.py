@@ -30,9 +30,15 @@ class PPOAvalonPlayer(AvalonPlayer):
     Player trained using PPO
     """
 
-    def __init__(self, role: Role, index: int, belief_model: BeliefPredictor, env: gym.Env) -> None:
+    def __init__(
+        self,
+        role: Role,
+        index: int,
+        actor_critic: ActorCriticModel,
+        env: gym.Env
+    ) -> None:
         super().__init__(role, index)
-        self.actor_critic = ActorCriticModel(belief_model, role, index)
+        self.actor_critic = actor_critic
         self.env = env
     
     def get_action(self, obs: AvalonGameState):

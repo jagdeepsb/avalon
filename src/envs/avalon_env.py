@@ -47,9 +47,9 @@ class AvalonEnv(gym.Env):
                 while new_assignment[agent_index] != agent_role:
                     random.shuffle(new_assignment)
             player_assignments = new_assignment
-        else:
-            # Check that the agent's role and index correspond
-            assert player_assignments[agent_index] == agent_role
+
+        # Check that the agent's role and index correspond
+        assert player_assignments[agent_index] == agent_role
 
         self.game_state = AvalonGameState(
             player_assignments,
