@@ -40,8 +40,15 @@ class PPOAvalonPlayer(AvalonPlayer):
         super().__init__(role, index)
         self.actor_critic = actor_critic
         self.env = env
+        
+        self.role = role
+        self.index = index
     
     def get_action(self, obs: AvalonGameState):
+        assert obs.player_assignments[self.index] == self.role, (
+            f"Expected player {self.index} to have role {self.role}, in game but got {obs.player_assignments[self.index]}"
+        )
+        
         if obs.game_stage == GameStage.MERLIN_VOTE:
             return self.guess_merlin(obs)
         elif obs.round_stage == RoundStage.TEAM_PROPOSAL:
@@ -65,7 +72,7 @@ class PPOAvalonPlayer(AvalonPlayer):
 
     def get_team_proposal_and_dist(self, game_state: AvalonGameState) -> Tuple[List[int], Categorical]:
         # return indices of top self.team_size players from dist
-        dist, _ = self.actor_critic.forward(game_state)
+        dist, _ = self.actor_critic.forward(game_state, self.role, self.index)
         top_k_probs, top_k_indices = torch.topk(dist.probs, game_state.team_size)
         top_k_logits = torch.log(top_k_probs)
         comb_indices = list(combinations(range(len(dist.probs)), game_state.team_size))
@@ -77,20 +84,23 @@ class PPOAvalonPlayer(AvalonPlayer):
         return best_combination, Categorical(logits=combination_logits)
     
     def get_team_vote_and_dist(self, game_state: AvalonGameState) -> Tuple[TeamVote, Categorical]:
-        dist, _ = self.actor_critic.forward(game_state)
+        dist, _ = self.actor_critic.forward(game_state, self.role, self.index)
         return torch.argmax(dist.probs).tolist(), dist
     
     def get_quest_vote_and_dist(self, game_state: AvalonGameState) -> Tuple[QuestVote, Categorical]:
-        dist, _ = self.actor_critic.forward(game_state)
+        dist, _ = self.actor_critic.forward(game_state, self.role, self.index)
         return torch.argmax(dist.probs).tolist(), dist
     
     def guess_merlin_and_dist(self, game_state: AvalonGameState) -> Tuple[int, Categorical]:
-        dist, _ = self.actor_critic.forward(game_state)
+        dist, _ = self.actor_critic.forward(game_state, self.role, self.index)
         return torch.argmax(dist.probs).item(), dist
 
     def get_action_probs_and_value(self, obs: AvalonGameState):
-        x = self.actor_critic.format_observation(obs)
-        _, values =  self.actor_critic.forward(obs)
+        assert obs.player_assignments[self.index] == self.role, (
+            f"Expected player {self.index} to have role {self.role}, in game but got {obs.player_assignments[self.index]}"
+        )
+        # x = self.actor_critic.format_observation(obs, self.role, self.index)
+        _, values =  self.actor_critic.forward(obs, self.role, self.index)
         log_prob = None
         if obs.game_stage == GameStage.MERLIN_VOTE:
             action, dist = self.guess_merlin_and_dist(obs)
@@ -108,6 +118,10 @@ class PPOAvalonPlayer(AvalonPlayer):
         return action, log_prob, values
     
     def get_value(self, obs: AvalonGameState):
+        assert obs.player_assignments[self.index] == self.role, (
+            f"Expected player {self.index} to have role {self.role}, in game but got {obs.player_assignments[self.index]}"
+        )
+        assert obs.player_assignments[self.index] == self.role
         _, _, values = self.get_action_probs_and_value(obs)
         return values
         

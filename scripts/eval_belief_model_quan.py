@@ -69,8 +69,11 @@ class BeliefsSimulator(AvalonSimulator):
             #     [Role.SPY if role == Role.SPY else Role.UNKNOWN for role in self.game_state.player_assignments]
             # )
             
-            from src.utils.belief_from_models import get_belief_for_player, get_belief_for_player_cheap
-            belief = get_belief_for_player(self.game_state, player_index, torch.device("cpu"))
+            from src.belief_models.trained import TrainedBeliefModel
+            from src.belief_models.trivial import GroundTruthBeliefModel
+            belief_model = TrainedBeliefModel()
+            # belief_model = GroundTruthBeliefModel()
+            belief = belief_model(self.game_state, player_index)
             # belief = get_belief_for_player_cheap(self.game_state, player_index, torch.device("cpu"))
             
             beliefs.append(belief)

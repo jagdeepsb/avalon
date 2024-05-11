@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 from src.game.game_state import AvalonGameState
-from src.models.belief_predictor import BeliefPredictor
 from src.game.beliefs import all_possible_ordered_role_assignments
 from torch.distributions.categorical import Categorical
 import torch.nn.functional as F
@@ -9,6 +8,7 @@ from torch.nn.functional import softmax
 from src.game.utils import (
     Role, QuestResult, RoundStage, GameStage
 )
+from src.belief_models.base import BeliefModel
 from src.game.utils import assignment_to_str
 import numpy as np
 from itertools import combinations
@@ -28,7 +28,7 @@ def init_params(m):
             m.bias.data.fill_(0)
 
 class ActorCriticModel(nn.Module):
-    def __init__(self, belief_model: BeliefPredictor, role: Role, index: int):
+    def __init__(self, belief_model: BeliefModel):
         """
         Represents an Actor model that takes a Avalon game/belief state
         as input
@@ -90,8 +90,6 @@ class ActorCriticModel(nn.Module):
         """
         super().__init__()
         self.belief_model = belief_model
-        self.role = role
-        self.index = index
 
         # Define actor models
         self.team_proposal_actor = nn.Sequential(
@@ -142,13 +140,15 @@ class ActorCriticModel(nn.Module):
         # Initialize parameters correctly
         self.apply(init_params)
 
-    def forward(self, obs: AvalonGameState):
+    def forward(self, obs: AvalonGameState, role: Role, index: int):
         """
         Performs a forward pass through the actor-critic network
 
         Parameters
         ----
         obs : AvalonGameState
+        role : Role
+        index : int
 
         ----
 
@@ -158,16 +158,18 @@ class ActorCriticModel(nn.Module):
             The distribution of actions from policy. A Categorical distribution
             for discreet action spaces.
         """
-        obs_in = self.format_observation(obs=obs).float()
-
+        
+        assert obs.player_assignments[index] == role, (
+            f"Expected player {index} to have role {role}, in game but got {obs.player_assignments[index]}"
+        )
+        
+        obs_in = self.format_observation(obs=obs, role=role, index=index).float()
         dist, value = None, None
 
         if obs.game_stage == GameStage.MERLIN_VOTE:
             # top_belief_ind = torch.argmax(obs_in)
             
-            # TODO: THIS IS A HACK YELL AT DEEPS TO FIX THIS
-            from src.utils.belief_from_models import get_belief_for_player_cheap
-            beliefs = get_belief_for_player_cheap(obs, self.index, 'cpu').distribution
+            beliefs = self.belief_model(obs, index).distribution
             beliefs = torch.tensor(beliefs)
             top_belief_ind = torch.argmax(beliefs)
             
@@ -200,19 +202,21 @@ class ActorCriticModel(nn.Module):
 
         return dist, value
 
-    def format_observation(self, obs: AvalonGameState):
-        role = torch.zeros(3)
+    def format_observation(self, obs: AvalonGameState, role: Role, index: int):
+        
+        assert obs.player_assignments[index] == role, (
+            f"Expected player {index} to have role {role}, in game but got {obs.player_assignments[index]}"
+        )
+        
+        role_one_hot = torch.zeros(3)
         role_inds = {Role.MERLIN: 0, Role.RESISTANCE: 1, Role.SPY: 2}
-        role[role_inds[self.role]] = 1
+        role_one_hot[role_inds[role]] = 1
         
         """
-        historical_obs = obs.game_state_obs(from_perspective_of_player_index=self.index)
+        historical_obs = obs.game_state_obs(from_perspective_of_player_index=index)
         beliefs = softmax(self.belief_model(torch.tensor(historical_obs).float().unsqueeze(0)))[0]
         """
-        # beliefs = softmax(torch.tensor(self.belief_model(obs)), dim = 0)
-        # TODO: THIS IS A HACK YELL AT DEEPS TO FIX THIS
-        from src.utils.belief_from_models import get_belief_for_player_cheap
-        beliefs = get_belief_for_player_cheap(obs, self.index, 'cpu').distribution
+        beliefs = self.belief_model(obs, index).distribution
         beliefs = torch.tensor(beliefs)
 
         leader = torch.zeros(5)
@@ -239,7 +243,7 @@ class ActorCriticModel(nn.Module):
             formatted_obs = beliefs
         if obs.round_stage == RoundStage.TEAM_PROPOSAL:
             formatted_obs = torch.cat([
-                                role,
+                                role_one_hot,
                                 beliefs,
                                 r_wins_progress,
                                 s_wins_progress,
@@ -247,7 +251,7 @@ class ActorCriticModel(nn.Module):
                             ])
         if obs.round_stage == RoundStage.TEAM_VOTE:
             formatted_obs = torch.cat([
-                                role,
+                                role_one_hot,
                                 beliefs,
                                 leader,
                                 team,
@@ -257,7 +261,7 @@ class ActorCriticModel(nn.Module):
                             ])
         if obs.round_stage == RoundStage.QUEST_VOTE:
             formatted_obs = torch.cat([
-                                role,
+                                role_one_hot,
                                 beliefs,
                                 leader,
                                 team,
@@ -268,7 +272,7 @@ class ActorCriticModel(nn.Module):
         return formatted_obs.to(torch.float32)
     
 
-    def evaluate_actions(self, states, actions):
+    def evaluate_actions(self, states, player_roles, player_indices, actions):
         """
         Evaluate the actions taken by the policy given the states.
 
@@ -289,9 +293,9 @@ class ActorCriticModel(nn.Module):
         log_probs = []
         state_values = []
         dist_entropy = 0
-
-        for state, action in zip(states, actions):
-            dist, value = self.forward(state)
+        
+        for state, action, role, player_index in zip(states, actions, player_roles, player_indices):
+            dist, value = self.forward(state, role, player_index) 
             action_tensor = torch.tensor(action)
 
             if state.round_stage == RoundStage.TEAM_PROPOSAL:

@@ -20,11 +20,11 @@ from src.utils.constants import (
 )
 from src.players.stupid_hardcoded_player import stupid_hardcoded_player_factory
 from src.players.ppo_player import PPOAvalonPlayer
-from src.utils.belief_from_models import get_belief_for_player_cheap
 from torch.distributions import Categorical
 from src.game.game_state import AvalonGameState
 from src.players.player import AvalonPlayer
 from src.game.arena import AvalonArena
+from src.belief_models.trivial import GroundTruthBeliefModel
 from copy import deepcopy
 
 def compute_returns(rewards, gamma=0.99):
@@ -47,8 +47,8 @@ def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
         advantages.insert(0, gae)
     return returns, advantages
 
-def ppo_step(policy, optimizer, states, actions, log_probs_old, returns, advantage, clip_param=0.2):
-    log_probs_new, state_values, dist_entropy = policy.evaluate_actions(states, actions)
+def ppo_step(policy, optimizer, states, player_roles, player_indices, actions, log_probs_old, returns, advantage, clip_param=0.2):
+    log_probs_new, state_values, dist_entropy = policy.evaluate_actions(states, player_roles, player_indices, actions)
     ratios = torch.exp(log_probs_new - log_probs_old)
     surr1 = ratios * advantage
     surr2 = torch.clamp(ratios, 1.0 - clip_param, 1.0 + clip_param) * advantage
@@ -83,44 +83,37 @@ def validate(
     ppo_win_rates_by_role = arena.get_win_rates_by_role()[0]
     ppo_win_rate = arena.get_overall_win_rates()[0]
     return ppo_win_rates_by_role, ppo_win_rate
-    
-
-class GroundTruthBeliefModel:
-    def __init__(self, role: Role, index: int):
-        self.role = role
-        self.index = index
-
-    def __call__(self, obs: AvalonGameState):
-        belief = get_belief_for_player_cheap(obs, self.index, 'cpu')
-        return belief.distribution
 
 
 if __name__ == "__main__":
     EXPERIMENT_NAME = "action_debug_16_30_10"
 
     # Config
-    roles = [
+    player_roles = [
         Role.MERLIN,
         Role.RESISTANCE,
         Role.RESISTANCE,
         Role.SPY,
         Role.SPY,
     ]
-    role = np.random.choice(roles)
-    index = np.random.choice(len(roles))
+    ppo_player_role = np.random.choice(player_roles)
+    ppo_player_index = np.random.choice(len(player_roles))
 
     # Setting up belief model
-    n_classes = len(all_possible_ordered_role_assignments(roles))
+    n_classes = len(all_possible_ordered_role_assignments(player_roles))
 
     # Setting up env
-    env = AvalonEnv(roles, stupid_hardcoded_player_factory, index, role, True)
+    env = AvalonEnv(
+        roles=player_roles,
+        bot_player_factory=stupid_hardcoded_player_factory,
+        randomize_player_assignments=True
+    )
 
     # Setting up belief model
-    new_belief_model = GroundTruthBeliefModel(role, index)
+    belief_model = GroundTruthBeliefModel()
 
     # Setting up action model
-    action_model = ActorCriticModel(new_belief_model, role, index)
-    ppo_player = PPOAvalonPlayer(role, index, action_model, env)
+    action_model = ActorCriticModel(belief_model)
     optimizer = optim.Adam(action_model.parameters(), lr=0.01)
     
     # For validation
@@ -128,13 +121,16 @@ if __name__ == "__main__":
         return PPOAvalonPlayer(role, index, action_model, env)
 
     # Dummy game loop for demonstration
-    states, actions, rewards = [], [], []
+    states, player_roles, player_indices, actions, rewards = [], [], [], [], []
     done = False
-    state = env.reset()
+    state, ppo_player_role, ppo_player_index = env.reset()
+    ppo_player = PPOAvalonPlayer(ppo_player_role, ppo_player_index, action_model, env)
     while not done:
         action = ppo_player.get_action(state)
         next_state, reward, done, _ = env.step(action)
         states.append(state)
+        player_roles.append(ppo_player_role)
+        player_indices.append(ppo_player_index)
         actions.append(action)
         rewards.append(reward)
         state = next_state
@@ -147,9 +143,11 @@ if __name__ == "__main__":
     clip_param = 0.2  # PPO clip parameter
 
     for episode in range(n_episodes):
-        state = env.reset()
+        state, ppo_player_role, ppo_player_index = env.reset()
+        ppo_player = PPOAvalonPlayer(ppo_player_role, ppo_player_index, action_model, env)
         done = False
-        states, actions, rewards, log_probs_old, masks, values = [], [], [], [], [], []
+        states, player_roles, player_indices, actions, rewards = [], [], [], [], []
+        log_probs_old, masks, values = [], [], []
         states.append(deepcopy(state))
         while not done:
             action, log_prob, value = ppo_player.get_action_probs_and_value(state)
@@ -157,6 +155,8 @@ if __name__ == "__main__":
 
             states.append(deepcopy(state))
             actions.append(action)
+            player_roles.append(ppo_player_role)
+            player_indices.append(ppo_player_index)
             rewards.append(reward)
             log_probs_old.append(log_prob)
             values.append(value)
@@ -169,12 +169,13 @@ if __name__ == "__main__":
         returns, advantages = compute_gae(next_value, rewards, masks, values, gamma, tau)
         returns = torch.tensor(returns)
         advantages = torch.tensor(advantages)
-        
-        loss = ppo_step(action_model, optimizer, states, actions, log_probs_old, returns, advantages, clip_param)
+                
+        loss = ppo_step(action_model, optimizer, states, player_roles, player_indices, actions, log_probs_old, returns, advantages, clip_param)
         
         if episode % 100 == 0:
-            win_rates_by_role, win_rate = validate(roles, ppo_player_factory, stupid_hardcoded_player_factory)
-            print(f"Episode {episode + 1}, Loss: {loss:.5f}, Win Rate: {win_rate:.5f}, Win Rates by Role: {win_rates_by_role}")
+            # win_rates_by_role, win_rate = validate(player_roles, ppo_player_factory, stupid_hardcoded_player_factory)
+            # print(f"Episode {episode + 1}, Loss: {loss:.5f}, Win Rate: {win_rate:.5f}, Win Rates by Role: {win_rates_by_role}")
+            print(f"Episode {episode + 1}, Loss: {loss:.5f}")
         else:
             print(f"Episode {episode + 1}, Loss: {loss:.5f}")
         

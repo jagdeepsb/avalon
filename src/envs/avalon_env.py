@@ -8,7 +8,7 @@ from src.game.utils import (
     QuestResult, RoundStage, GameStage,
 )
 from src.players.player import AvalonPlayer
-from typing import List, Callable
+from typing import List, Callable, Tuple, Dict
 from src.game.utils import Role
 from src.game.simulator import AvalonSimulator
 from src.players.random_player import RandomAvalonPlayer
@@ -19,67 +19,72 @@ class AvalonEnv(gym.Env):
     Custom Environment for the game Avalon that follows gym interface.
     """
 
-    def __init__(self, roles: List[Role], bot_player_factory, agent_index, agent_role = None, randomize_player_assignments=True, verbose=False):
+    def __init__(
+        self,
+        roles: List[Role],
+        bot_player_factory: Callable[[Role, int], AvalonPlayer],
+        randomize_player_assignments=True,
+        verbose=False
+    ):
         """
         Initialize the environment
 
         Input:
         - roles: List of roles for the game
         - bot_player_factory: Factory function that returns a bot player instance
-        - agent_index: The index of the agent
-        - agent_role: The role of the agent, if None, randomly assigns the agent a role
         - randomize_player_assignments: Whether to randomize the player assignments
         - verbose: Whether to print game state information
         
         """
         super(AvalonEnv, self).__init__()
-
-
+        
         # Initialize state
         self.roles = roles
+        self.bot_player_factory = bot_player_factory    
         self.randomize_player_assignments = randomize_player_assignments
         self.verbose = verbose
 
-        player_assignments = roles
-        # Find satisfying player assignments
-        if randomize_player_assignments:
-            new_assignment = self.roles[:]
-            random.shuffle(new_assignment)
-            if agent_role is not None:
-                while new_assignment[agent_index] != agent_role:
-                    random.shuffle(new_assignment)
-            player_assignments = new_assignment
-
-        # Check that the agent's role and index correspond
-        assert player_assignments[agent_index] == agent_role
-
-        self.player_assignment = player_assignments
-        self.game_state = AvalonGameState(
-            player_assignments,
-            randomize_player_assignments=False, 
-            verbose=verbose
-        )
-        self.agent_index = agent_index
-        self.agent_role = self.player_assignment[self.agent_index]
-
-        self.num_players = len(roles)
-        self.players: dict[int, AvalonPlayer] = {}
-        for i, role in enumerate(roles):
-            if i != self.agent_index:
-                self.players[i] = bot_player_factory(role, i)
         self.reset()
 
-    def reset(self):
+    def reset(self) -> Tuple[AvalonGameState, Role, int]:
         """
-        Reset the state of the environment to an initial state
+        Reset the environment:
+        - Reset the game state
+        - Randomly shuffle player assignments (if randomize_player_assignments=True)
+        - Assign the agent to a random role and player index
+        
+        Returns
+        - game_state: The initial game state
+        - agent_role: The role of the agent
+        - agent_index: The index of the agent
         """
+        
+        # Compute player assignments
+        player_assignments = self.roles.copy()
+        if self.randomize_player_assignments:
+            random.shuffle(player_assignments)
+            
+        # Assign agent role and index
+        self.agent_index = np.random.choice(len(player_assignments))
+        self.agent_role = player_assignments[self.agent_index]
+        
+        # Create simulator
+        self.player_assignments = player_assignments
         self.game_state = AvalonGameState(
-            self.player_assignment,
+            self.player_assignments,
             randomize_player_assignments=False, 
             verbose=self.verbose
         )
-        return self.game_state
 
+        # Initialize bot players
+        self.num_players = len(self.player_assignments)
+        self.players: dict[int, AvalonPlayer] = {}
+        for i, role in enumerate(self.player_assignments):
+            if i != self.agent_index:
+                self.players[i] = self.bot_player_factory(role, i)
+                
+        return self.game_state, self.agent_role, self.agent_index
+        
     def step(self, action: List[int]):
         """
         The action method where the game dynamics are implemented
@@ -100,11 +105,11 @@ class AvalonEnv(gym.Env):
         info = {}
         if self.game_state.game_stage == GameStage.SPY_WIN:
             done = True
-            if self.player_assignment[self.agent_index] == Role.SPY:
+            if self.player_assignments[self.agent_index] == Role.SPY:
                 reward = 1.0
         elif self.game_state.game_stage == GameStage.RESISTANCE_WIN:
             done = True
-            if self.player_assignment[self.agent_index] == Role.RESISTANCE or self.player_assignment[self.agent_index] == Role.MERLIN:
+            if self.player_assignments[self.agent_index] == Role.RESISTANCE or self.player_assignments[self.agent_index] == Role.MERLIN:
                 reward = 1.0
         return self.game_state, reward, done, info
 
@@ -140,7 +145,7 @@ class AvalonEnv(gym.Env):
         self.game_state.vote_on_quest(quest_votes)
     
     def _merlin_vote_step(self, action) -> None:
-        if self.player_assignment[self.agent_index] != Role.SPY:
+        if self.player_assignments[self.agent_index] != Role.SPY:
             merlin_guesses = []
             for i, player in self.players.items():
                 if player.role == Role.SPY:
