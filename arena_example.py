@@ -19,7 +19,8 @@ arena = AvalonArena(
     roles=roles,
     player_factory_1=random_player_factory,
     player_factory_2=random_player_factory,
-    num_games=10000,
+    num_games=100,
+    exactly_n_strategy_1=1,
 )
 
 for win_rates, label in zip(arena.get_win_rates_by_role(), ["Random 1", "Random 2"]):
