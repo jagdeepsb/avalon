@@ -34,14 +34,16 @@ class AvalonEnv(gym.Env):
         """
         super(AvalonEnv, self).__init__()
 
-        self.randomize_player_assignments = randomize_player_assignments
 
         # Initialize state
+        self.roles = roles
+        self.randomize_player_assignments = randomize_player_assignments
+        self.verbose = verbose
 
         player_assignments = roles
         # Find satisfying player assignments
         if randomize_player_assignments:
-            new_assignment = roles[:]
+            new_assignment = self.roles[:]
             random.shuffle(new_assignment)
             if agent_role is not None:
                 while new_assignment[agent_index] != agent_role:
@@ -51,12 +53,12 @@ class AvalonEnv(gym.Env):
         # Check that the agent's role and index correspond
         assert player_assignments[agent_index] == agent_role
 
+        self.player_assignment = player_assignments
         self.game_state = AvalonGameState(
             player_assignments,
             randomize_player_assignments=False, 
             verbose=verbose
         )
-        self.player_assignment = self.game_state.player_assignments
         self.agent_index = agent_index
         self.agent_role = self.player_assignment[self.agent_index]
 
@@ -71,7 +73,12 @@ class AvalonEnv(gym.Env):
         """
         Reset the state of the environment to an initial state
         """
-        self.game_state.reset(self.randomize_player_assignments)
+        self.game_state = AvalonGameState(
+            self.player_assignment,
+            randomize_player_assignments=False, 
+            verbose=self.verbose
+        )
+        print(self.game_state.player_assignments)
         return self.game_state
 
     def step(self, action: List[int]):
