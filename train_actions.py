@@ -84,6 +84,16 @@ def validate(
     )
     ppo_win_rates_by_role = arena.get_win_rates_by_role()[0]
     ppo_win_rate = arena.get_overall_win_rates()[0]
+    
+    for win_rates, label in zip(arena.get_win_rates_by_role(), ["PPO", "BOT"]):
+        print(f"{label} win rates:")
+        for role, win_rate in win_rates.items():
+            print(f"{role}: {win_rate}")
+        print()
+        
+    for win_rate, label in zip(arena.get_overall_win_rates(), ["PPO", "BOT"]):
+        print(f"{label} win rate: {win_rate}")
+    
     return ppo_win_rates_by_role, ppo_win_rate
 
 
@@ -176,8 +186,8 @@ if __name__ == "__main__":
         
         if episode % 100 == 0:
             win_rates_by_role, win_rate = validate(game_player_roles, ppo_player_factory, bot_player_factory)
-            print(f"Episode {episode + 1}, Loss: {loss:.5f}, Win Rate: {win_rate:.5f}, Win Rates by Role: {win_rates_by_role}")
-            # print(f"Episode {episode + 1}, Loss: {loss:.5f}")
+            # print(f"Episode {episode + 1}, Loss: {loss:.5f}, Win Rate: {win_rate:.5f}, Win Rates by Role: {win_rates_by_role}")
+            print(f"Episode {episode + 1}, Loss: {loss:.5f}")
         else:
             print(f"Episode {episode + 1}, Loss: {loss:.5f}")
         
