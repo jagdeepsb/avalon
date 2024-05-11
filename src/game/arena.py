@@ -18,6 +18,7 @@ class AvalonArena():
         player_factory_1: Callable[[Role], AvalonPlayer],
         player_factory_2: Callable[[Role], AvalonPlayer],
         num_games: int,
+        exactly_n_strategy_1: Optional[int] = None,
     ) -> None:
         """
         Pits two avalon strategies against each other in a series of games.
@@ -32,6 +33,7 @@ class AvalonArena():
         self.player_factory_1 = player_factory_1
         self.player_factory_2 = player_factory_2
         self.num_games = num_games
+        self.exactly_n_strategy_1 = exactly_n_strategy_1
         
         # (strategy number, number of players from strategy 1, player role, spy win or resistance win)
         self.history: List[Tuple[int, int, Role, GameStage]] = [] 
@@ -53,7 +55,11 @@ class AvalonArena():
         Run the arena and store statistics of the games played.
         """
         
-        n_strategy_1 = 0
+        # Each game will have a different number of players assigned to strategy 1,
+        # unless exactly_n_strategy_1 is set
+        n_strategy_1 = 0 if self.exactly_n_strategy_1 is None else self.exactly_n_strategy_1
+        
+        
         for i in tqdm(range(self.num_games)):
             simulator = AvalonSimulator(
                 self.roles,
@@ -65,7 +71,10 @@ class AvalonArena():
                     0 if i < n_strategy_1 else 1,
                     n_strategy_1, player_role, final_game_state.game_stage
                 ))
-            n_strategy_1 = (n_strategy_1 + 1) % (len(self.roles)+1)
+            
+            # Update n_strategy_1 if exactly_n_strategy_1 is not set
+            if self.exactly_n_strategy_1 is None:
+                n_strategy_1 = (n_strategy_1 + 1) % (len(self.roles)+1)
             
     def get_win_rates_by_role(
         self,

@@ -80,6 +80,7 @@ def validate(
         player_factory_1=ppo_player_factory,
         player_factory_2=baseline_player_factory,
         num_games=num_games,
+        exactly_n_strategy_1=1, # Games should have only 1 PPO player
     )
     ppo_win_rates_by_role = arena.get_win_rates_by_role()[0]
     ppo_win_rate = arena.get_overall_win_rates()[0]
