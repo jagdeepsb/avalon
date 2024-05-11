@@ -19,6 +19,7 @@ from src.utils.constants import (
     SPY_VAL_BELIEF_DATASET_PATH,
 )
 from src.players.stupid_hardcoded_player import stupid_hardcoded_player_factory
+from src.players.random_player import random_player_factory
 from src.players.ppo_player import PPOAvalonPlayer
 from torch.distributions import Categorical
 from src.game.game_state import AvalonGameState
@@ -89,23 +90,23 @@ if __name__ == "__main__":
     EXPERIMENT_NAME = "action_debug_16_30_10"
 
     # Config
-    player_roles = [
+    game_player_roles = [
         Role.MERLIN,
         Role.RESISTANCE,
         Role.RESISTANCE,
         Role.SPY,
         Role.SPY,
     ]
-    ppo_player_role = np.random.choice(player_roles)
-    ppo_player_index = np.random.choice(len(player_roles))
+    bot_player_factory = random_player_factory
+    # bot_player_factory = stupid_hardcoded_player_factory
 
     # Setting up belief model
-    n_classes = len(all_possible_ordered_role_assignments(player_roles))
+    n_classes = len(all_possible_ordered_role_assignments(game_player_roles))
 
     # Setting up env
     env = AvalonEnv(
-        roles=player_roles,
-        bot_player_factory=stupid_hardcoded_player_factory,
+        roles=game_player_roles,
+        bot_player_factory=bot_player_factory,
         randomize_player_assignments=True
     )
 
@@ -173,9 +174,9 @@ if __name__ == "__main__":
         loss = ppo_step(action_model, optimizer, states, player_roles, player_indices, actions, log_probs_old, returns, advantages, clip_param)
         
         if episode % 100 == 0:
-            # win_rates_by_role, win_rate = validate(player_roles, ppo_player_factory, stupid_hardcoded_player_factory)
-            # print(f"Episode {episode + 1}, Loss: {loss:.5f}, Win Rate: {win_rate:.5f}, Win Rates by Role: {win_rates_by_role}")
-            print(f"Episode {episode + 1}, Loss: {loss:.5f}")
+            win_rates_by_role, win_rate = validate(game_player_roles, ppo_player_factory, bot_player_factory)
+            print(f"Episode {episode + 1}, Loss: {loss:.5f}, Win Rate: {win_rate:.5f}, Win Rates by Role: {win_rates_by_role}")
+            # print(f"Episode {episode + 1}, Loss: {loss:.5f}")
         else:
             print(f"Episode {episode + 1}, Loss: {loss:.5f}")
         

@@ -55,7 +55,6 @@ class AvalonArena():
         
         n_strategy_1 = 0
         for i in tqdm(range(self.num_games)):
-            print(f"[ARENA]: roles={self.roles}, game={i}/{self.num_games},")
             simulator = AvalonSimulator(
                 self.roles,
                 self.get_combined_factory(n_strategy_1),

@@ -96,6 +96,7 @@ class Belief:
             if self._is_match(role_assignment, list(assignment)):
                 new_probabilities[i] = self.probabilities[i]
         # normalize
+        assert not np.allclose(new_probabilities.sum(), 0.0), "Conditioning on an impossible role assignment."
         new_probabilities /= new_probabilities.sum()
         return Belief(self.all_assignments, new_probabilities)
     
@@ -113,6 +114,9 @@ class Belief:
         for i, assignment in enumerate(self.all_assignments):
             if not assignment_possible_given_quests(assignment):
                 new_probabilities[i] = 0
+        assert not np.allclose(new_probabilities.sum(), 0.0), (
+            "Conditioning on an impossible role assignment given the quest history. This happens when \"good\" players fail quests, change your code so that this is impossible."
+        )
         new_probabilities /= new_probabilities.sum()
         return Belief(self.all_assignments, new_probabilities)
         
