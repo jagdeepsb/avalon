@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 from typing import List, Callable, Tuple, Dict
 
-from src.game.utils import Role
+from src.game.utils import Role, RoundStage
 from src.models.ac_models import ActorCriticModel
 from src.datasets.belief_dataset import BeliefDataset
 from src.models.belief_predictor import BeliefPredictor
@@ -98,8 +98,6 @@ def validate(
 
 
 if __name__ == "__main__":
-    EXPERIMENT_NAME = "action_debug_16_30_10"
-
     # Config
     game_player_roles = [
         Role.MERLIN,
@@ -126,7 +124,6 @@ if __name__ == "__main__":
 
     # Setting up action model
     action_model = ActorCriticModel(belief_model)
-    optimizer = optim.Adam(action_model.parameters(), lr=0.01)
     
     # For validation
     def ppo_player_factory(role: Role, index: int) -> PPOAvalonPlayer:
@@ -134,60 +131,58 @@ if __name__ == "__main__":
 
     # Dummy game loop for demonstration
     states, player_roles, player_indices, actions, rewards = [], [], [], [], []
-    done = False
-    state, ppo_player_role, ppo_player_index = env.reset()
-    ppo_player = PPOAvalonPlayer(ppo_player_role, ppo_player_index, action_model, env)
-    while not done:
-        action = ppo_player.get_action(state)
-        next_state, reward, done, _ = env.step(action)
-        states.append(deepcopy(state))
-        player_roles.append(ppo_player_role)
-        player_indices.append(ppo_player_index)
-        actions.append(action)
-        rewards.append(reward)
-        state = next_state
-
-    # ACTUALLY TRAIN THE PPO AGENT
-    n_episodes = 10000  # number of episodes to train
-    max_timesteps = 1000  # max timesteps in one episode
-    gamma = 0.99  # discount factor
-    tau = 0.95  # factor for GAE
-    clip_param = 0.2  # PPO clip parameter
-
-    for episode in range(n_episodes):
+    for iter in range(1000):
+        print(iter)
+        done = False
         state, ppo_player_role, ppo_player_index = env.reset()
         ppo_player = PPOAvalonPlayer(ppo_player_role, ppo_player_index, action_model, env)
-        done = False
-        states, player_roles, player_indices, actions, rewards = [], [], [], [], []
-        log_probs_old, masks, values = [], [], []
-        states.append(deepcopy(state))
         while not done:
-            action, log_prob, value = ppo_player.get_action_probs_and_value(state)
+            action = ppo_player.get_action(state)
             next_state, reward, done, _ = env.step(action)
-
             states.append(deepcopy(state))
-            actions.append(action)
             player_roles.append(ppo_player_role)
             player_indices.append(ppo_player_index)
+            actions.append(action)
             rewards.append(reward)
-            log_probs_old.append(log_prob)
-            values.append(value)
-            masks.append(1 - int(done))
-
             state = next_state
 
-        log_probs_old = torch.stack(log_probs_old)
-        next_value = ppo_player.get_value(next_state)
-        returns, advantages = compute_gae(next_value, rewards, masks, values, gamma, tau)
-        returns = torch.tensor(returns)
-        advantages = torch.tensor(advantages)
-                
-        loss = ppo_step(action_model, optimizer, states, player_roles, player_indices, actions, log_probs_old, returns, advantages, clip_param)
-        
-        if episode % 100 == 0:
-            win_rates_by_role, win_rate = validate(game_player_roles, ppo_player_factory, bot_player_factory)
-            # print(f"Episode {episode + 1}, Loss: {loss:.5f}, Win Rate: {win_rate:.5f}, Win Rates by Role: {win_rates_by_role}")
-            print(f"Episode {episode + 1}, Loss: {loss:.5f}")
-        else:
-            print(f"Episode {episode + 1}, Loss: {loss:.5f}")
-        
+    actions_dict_proposal = {}
+    actions_dict_team_vote = {}
+    actions_dict_quest_vote = {}
+    num_proposal = 0
+    num_team = 0
+    num_quest = 0
+    for i in range(len(actions)):
+        a = actions[i]
+        if type(a) == list:
+            a = tuple(a)
+        s = states[i]
+        round_stage = s.round_stage
+        if round_stage == RoundStage.TEAM_PROPOSAL:
+            num_proposal += 1
+            if a in actions_dict_proposal:
+                actions_dict_proposal[a] += 1
+            else:
+                actions_dict_proposal[a] = 1
+        if round_stage == RoundStage.TEAM_VOTE:
+            num_team += 1
+            if a in actions_dict_team_vote:
+                actions_dict_team_vote[a] += 1
+            else:
+                actions_dict_team_vote[a] = 1
+        if round_stage == RoundStage.QUEST_VOTE:
+            num_quest += 1
+            if a in actions_dict_quest_vote:
+                actions_dict_quest_vote[a] += 1
+            else:
+                actions_dict_quest_vote[a] = 1
+
+    print("proposal avg actions")
+    for a in actions_dict_proposal:
+        print(a, actions_dict_proposal[a] / num_proposal)
+    print("team vote avg actions")
+    for a in actions_dict_team_vote:
+        print(a, actions_dict_team_vote[a] / num_team)
+    print("quest vote avg actions")
+    for a in actions_dict_quest_vote:
+        print(a, actions_dict_quest_vote[a] / num_quest)
