@@ -115,15 +115,18 @@ if __name__ == "__main__":
     # Setting up belief model
     n_classes = len(all_possible_ordered_role_assignments(game_player_roles))
 
-    # Setting up env
-    env = AvalonEnv(
-        roles=game_player_roles,
-        bot_player_factory=bot_player_factory,
-        randomize_player_assignments=True
-    )
 
     # Setting up belief model
     belief_model = GroundTruthBeliefModel()
+    
+    # Setting up env
+    env = AvalonEnv(
+        roles=game_player_roles,
+        belief_model=belief_model,
+        bot_player_factory=bot_player_factory,
+        randomize_player_assignments=True,
+        # verbose=True
+    )
 
     # Setting up action model
     action_model = ActorCriticModel(belief_model)
@@ -166,16 +169,14 @@ if __name__ == "__main__":
             action, log_prob, value = ppo_player.get_action_probs_and_value(state)
             next_state, reward, done, info = env.step(action)
             
-            if info["did_use_agent_action"]:
-                # Only train on actions taken by the PPO agent
-                states.append(state)
-                actions.append(action)
-                player_roles.append(ppo_player_role)
-                player_indices.append(ppo_player_index)
-                rewards.append(reward)
-                log_probs_old.append(log_prob)
-                values.append(value)
-                masks.append(1 - int(done))
+            states.append(state)
+            actions.append(action)
+            player_roles.append(ppo_player_role)
+            player_indices.append(ppo_player_index)
+            rewards.append(reward)
+            log_probs_old.append(log_prob)
+            values.append(value)
+            masks.append(1 - int(done))
 
             state = next_state
             
