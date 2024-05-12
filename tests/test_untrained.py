@@ -131,15 +131,15 @@ if __name__ == "__main__":
 
     # Dummy game loop for demonstration
     states, player_roles, player_indices, actions, rewards = [], [], [], [], []
-    for iter in range(1000):
+    for iter in range(100):
         print(iter)
         done = False
         state, ppo_player_role, ppo_player_index = env.reset()
         ppo_player = PPOAvalonPlayer(ppo_player_role, ppo_player_index, action_model, env)
         while not done:
             action = ppo_player.get_action(state)
-            next_state, reward, done, _ = env.step(action)
             states.append(deepcopy(state))
+            next_state, reward, done, _ = env.step(action)
             player_roles.append(ppo_player_role)
             player_indices.append(ppo_player_index)
             actions.append(action)

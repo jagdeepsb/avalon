@@ -139,8 +139,8 @@ if __name__ == "__main__":
     ppo_player = PPOAvalonPlayer(ppo_player_role, ppo_player_index, action_model, env)
     while not done:
         action = ppo_player.get_action(state)
-        next_state, reward, done, _ = env.step(action)
         states.append(deepcopy(state))
+        next_state, reward, done, _ = env.step(action)
         player_roles.append(ppo_player_role)
         player_indices.append(ppo_player_index)
         actions.append(action)
