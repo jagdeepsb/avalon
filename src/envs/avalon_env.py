@@ -13,6 +13,7 @@ from src.game.utils import Role
 from src.game.simulator import AvalonSimulator
 from src.players.random_player import RandomAvalonPlayer
 import random
+from copy import deepcopy
 
 class AvalonEnv(gym.Env):
     """
@@ -83,7 +84,7 @@ class AvalonEnv(gym.Env):
             if i != self.agent_index:
                 self.players[i] = self.bot_player_factory(role, i)
                 
-        return self.game_state, self.agent_role, self.agent_index
+        return deepcopy(self.game_state), self.agent_role, self.agent_index
         
     def step(self, action: List[int]):
         """
@@ -111,7 +112,7 @@ class AvalonEnv(gym.Env):
             done = True
             if self.player_assignments[self.agent_index] == Role.RESISTANCE or self.player_assignments[self.agent_index] == Role.MERLIN:
                 reward = 1.0
-        return self.game_state, reward, done, info
+        return deepcopy(self.game_state), reward, done, info
 
     def _team_proposal_step(self, action: List[int]) -> None:
         if self.game_state.leader_index != self.agent_index:

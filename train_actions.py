@@ -160,12 +160,12 @@ if __name__ == "__main__":
         done = False
         states, player_roles, player_indices, actions, rewards = [], [], [], [], []
         log_probs_old, masks, values = [], [], []
-        states.append(deepcopy(state))
         while not done:
+            
             action, log_prob, value = ppo_player.get_action_probs_and_value(state)
             next_state, reward, done, _ = env.step(action)
-
-            states.append(deepcopy(state))
+            
+            states.append(state)
             actions.append(action)
             player_roles.append(ppo_player_role)
             player_indices.append(ppo_player_index)
