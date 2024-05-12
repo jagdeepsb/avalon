@@ -11,6 +11,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import VecEnvWrapper, DummyVecEnv, SubprocVecEnv
 
+from src.utils.constants import MODELS_DIR
 from src.game.utils import Role
 from src.models.ac_models import ActorCriticModel
 from src.players.stupid_hardcoded_player import stupid_hardcoded_player_factory
@@ -133,9 +134,14 @@ def validate(
     
     return ppo_win_rates_by_role, ppo_win_rate
 
+def bot_player_factory(role: Role, index: int) -> AvalonPlayer:
+    if role != Role.SPY:
+        return stupid_hardcoded_player_factory(role, index)
+    else:
+        return random_player_factory(role, index)
 
 if __name__ == "__main__":
-    EXPERIMENT_NAME = "ppo"
+    EXPERIMENT_NAME = "ppo_v2"
 
     # Config
     game_player_roles = [
@@ -145,7 +151,8 @@ if __name__ == "__main__":
         Role.SPY,
         Role.SPY,
     ]
-    bot_player_factory = random_player_factory
+
+    # bot_player_factory = random_player_factory
     # bot_player_factory = stupid_hardcoded_player_factory
 
     # Setting up belief model
@@ -177,5 +184,5 @@ if __name__ == "__main__":
     callback = CustomCallback()
     
     model = PPO("MlpPolicy", vec_env, verbose=1)
-    model.learn(total_timesteps=1000000, callback=callback)
-    model.save("ppo_avalon")
+    model.learn(total_timesteps=10000, callback=callback)
+    model.save(os.path.join(MODELS_DIR, EXPERIMENT_NAME))
