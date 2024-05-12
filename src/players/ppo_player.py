@@ -1,9 +1,9 @@
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Any
 import random
 import torch
 import torch.nn as nn
-import gym
+import gymnasium as gym
 from torch.distributions.categorical import Categorical
 import torch.optim as optim
 import numpy as np
@@ -12,6 +12,8 @@ import time
 import os
 from itertools import combinations
 import math
+from torch.nn.functional import softmax
+from src.belief_models.base import BeliefModel
 
 
 from src.game.utils import (
@@ -34,292 +36,107 @@ class PPOAvalonPlayer(AvalonPlayer):
         self,
         role: Role,
         index: int,
-        actor_critic: ActorCriticModel,
-        env: gym.Env
+        actor: Any,
+        belief_model: BeliefModel
     ) -> None:
-        super().__init__(role, index)
-        self.actor_critic = actor_critic
-        self.env = env
-        
+        super().__init__(role, index)        
         self.role = role
         self.index = index
+        self.actor = actor
+        self.belief_model = belief_model
     
-    def get_action(self, obs: AvalonGameState):
-        assert obs.player_assignments[self.index] == self.role, (
-            f"Expected player {self.index} to have role {self.role}, in game but got {obs.player_assignments[self.index]}"
-        )
-        
-        if obs.game_stage == GameStage.MERLIN_VOTE:
-            return self.guess_merlin(obs)
-        elif obs.round_stage == RoundStage.TEAM_PROPOSAL:
-            return self.get_team_proposal(obs)
-        elif obs.round_stage == RoundStage.TEAM_VOTE:
-            return self.get_team_vote(obs)
-        elif obs.round_stage == RoundStage.QUEST_VOTE:
-            return self.get_quest_vote(obs)
-
     def get_team_proposal(self, game_state: AvalonGameState) -> List[int]:
-        return self.get_team_proposal_and_dist(game_state)[0]
+        action = self._get_action_numpy(game_state)
+        team_size = game_state.team_size
+        
+        # get the top team_size indices
+        team_inds = action.argsort()[-team_size:][::-1]
+        return team_inds.tolist()
     
     def get_team_vote(self, game_state: AvalonGameState) -> TeamVote:
-        return self.get_team_vote_and_dist(game_state)[0]
+        action = self._get_action_numpy(game_state)
+        # only use the first two indices
+        return TeamVote.APPROVE if action[0] > action[1] else TeamVote.REJECT
     
     def get_quest_vote(self, game_state: AvalonGameState) -> QuestVote:
-        return self.get_quest_vote_and_dist(game_state)[0]
+        action = self._get_action_numpy(game_state)
+        # Good players cannot fail quests
+        if self.role != Role.SPY:
+            return QuestVote.SUCCESS
+        
+        # only use the first two indices
+        return QuestVote.SUCCESS if action[0] > action[1] else QuestVote.FAIL
     
     def guess_merlin(self, game_state: AvalonGameState) -> int:
-        return self.guess_merlin_and_dist(game_state)[0]
-
-    def get_team_proposal_and_dist(self, game_state: AvalonGameState) -> Tuple[List[int], Categorical]:
-        # return indices of top self.team_size players from dist
-        dist, _ = self.actor_critic.forward(game_state, self.role, self.index)
-        top_k_probs, top_k_indices = torch.topk(dist.probs, game_state.team_size)
-        top_k_logits = torch.log(top_k_probs)
-        comb_indices = list(combinations(range(len(dist.probs)), game_state.team_size))
-        scores = torch.tensor([dist.probs[list(indices)].sum() for indices in comb_indices])
-        probabilities = torch.softmax(scores, dim=0)
-        combination_logits = torch.log(probabilities + 1e-9)  
-        max_score, max_index = torch.max(scores, dim=0)
-        best_combination = list(comb_indices[max_index])
-        return best_combination, Categorical(logits=combination_logits)
+        belief = self.belief_model(game_state, self.index)
+        top_belief_ind = np.argmax(belief.distribution)
+            
+        role_assignment = belief.all_assignments[top_belief_ind]
+        merlin_index = role_assignment.index(Role.MERLIN)
+        return merlin_index
     
-    def get_team_vote_and_dist(self, game_state: AvalonGameState) -> Tuple[TeamVote, Categorical]:
-        dist, _ = self.actor_critic.forward(game_state, self.role, self.index)
-        return torch.argmax(dist.probs).tolist(), dist
+    ###########
+    # Helpers #
+    ###########
     
-    def get_quest_vote_and_dist(self, game_state: AvalonGameState) -> Tuple[QuestVote, Categorical]:
-        dist, _ = self.actor_critic.forward(game_state, self.role, self.index)
-        return torch.argmax(dist.probs).tolist(), dist
+    def _get_action_numpy(self, game_state: AvalonGameState) -> np.ndarray:
+        obs = self._get_obs(game_state)
+        action_npy, _ = self.actor.predict(obs)
+        return action_npy
     
-    def guess_merlin_and_dist(self, game_state: AvalonGameState) -> Tuple[int, Categorical]:
-        dist, _ = self.actor_critic.forward(game_state, self.role, self.index)
-        return torch.argmax(dist.probs).item(), dist
-
-    def get_action_probs_and_value(self, obs: AvalonGameState):
-        assert obs.player_assignments[self.index] == self.role, (
-            f"Expected player {self.index} to have role {self.role}, in game but got {obs.player_assignments[self.index]}"
-        )
-        # x = self.actor_critic.format_observation(obs, self.role, self.index)
-        _, values =  self.actor_critic.forward(obs, self.role, self.index)
-        log_prob = None
-        if obs.game_stage == GameStage.MERLIN_VOTE:
-            action, dist = self.guess_merlin_and_dist(obs)
-            log_prob = dist.log_prob(torch.tensor(action))
-        elif obs.round_stage == RoundStage.TEAM_PROPOSAL:
-            action, dist = self.get_team_proposal_and_dist(obs)
-            selected_logits = dist.logits[action]
-            log_prob = selected_logits.sum()
-        elif obs.round_stage == RoundStage.TEAM_VOTE:
-            action, dist = self.get_team_vote_and_dist(obs)
-            log_prob = dist.log_prob(torch.tensor(action))
-        elif obs.round_stage == RoundStage.QUEST_VOTE:
-            action, dist = self.get_quest_vote_and_dist(obs)
-            log_prob = dist.log_prob(torch.tensor(action))
-        return action, log_prob, values
-    
-    def get_value(self, obs: AvalonGameState):
-        assert obs.player_assignments[self.index] == self.role, (
-            f"Expected player {self.index} to have role {self.role}, in game but got {obs.player_assignments[self.index]}"
-        )
-        assert obs.player_assignments[self.index] == self.role
-        _, _, values = self.get_action_probs_and_value(obs)
-        return values
+    def _get_obs(self, game_state: AvalonGameState) -> np.ndarray:
         
+        # Role as one hot
+        role_one_hot = np.zeros(3)
+        role_inds = {Role.MERLIN: 0, Role.RESISTANCE: 1, Role.SPY: 2}
+        role_one_hot[role_inds[self.role]] = 1
+        
+        # Index of agent as one hot
+        agent_index_one_hot = np.zeros(5)
+        agent_index_one_hot[self.index] = 1
+        
+        # Beliefs
+        beliefs = self.belief_model(game_state, self.index).distribution
+        
+        # Action type as one hot
+        action_type_one_hot = np.zeros(3)
+        assert game_state.game_stage == GameStage.IN_PROGRESS, (
+            f"Unexpected game stage: {game_state.game_stage}"
+        )
+        if game_state.round_stage == RoundStage.TEAM_PROPOSAL:
+            action_type_one_hot[0] = 1
+        elif game_state.round_stage == RoundStage.TEAM_VOTE:
+            action_type_one_hot[1] = 1
+        elif game_state.round_stage == RoundStage.QUEST_VOTE:
+            action_type_one_hot[2] = 1
 
-    def train(self, n_iters: int):
-        args = tyro.cli(Args)
-        device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+        # Leader
+        leader = np.zeros(5)
+        leader[game_state.leader_index] = 1
+        
+        # Team
+        team = np.zeros(5)
+        if game_state.round_stage == RoundStage.TEAM_VOTE or game_state.round_stage == RoundStage.QUEST_VOTE:
+            team_inds = game_state.teams[-1]
+            team[team_inds] = 1
 
-        optimizer = optim.Adam(self.actor_critic.parameters(), lr=args.learning_rate, eps=1e-5)
+        # Quest progress
+        r_wins_progress = np.array([np.count_nonzero(game_state.quest_results == QuestResult.SUCCEEDED) / 3])
+        s_wins_progress = np.array([np.count_nonzero(game_state.quest_results == QuestResult.FAILED) / 3])
+        
+        # Quest number
+        quest_num = np.zeros(5)
+        quest_num[game_state.quest_num] = 1
 
-        obs = torch.zeros((args.num_steps, args.num_envs) + self.single_observation_space.shape).to(device)
-        actions = torch.zeros((args.num_steps, args.num_envs) + self.env.single_action_space.shape).to(device)
-        logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
-        rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
-        dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
-        values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+        # Turns until hammer
+        turns_until_hammer = np.zeros(5)
+        for i in range(game_state.turns_until_hammer[0]):
+            turns_until_hammer[(game_state.leader_index + i) % 5] = i + 1
+        turns_until_hammer = softmax(torch.Tensor(turns_until_hammer), dim = 0).numpy()
 
-        # TRY NOT TO MODIFY: start the game
-        global_step = 0
-        start_time = time.time()
-        next_obs, _ = self.env.reset(seed=args.seed)
-        next_obs = torch.Tensor(next_obs).to(device)
-        next_done = torch.zeros(args.num_envs).to(device)
-
-        for iteration in range(1, args.num_iterations + 1):
-            # Annealing the rate if instructed to do so.
-            if args.anneal_lr:
-                frac = 1.0 - (iteration - 1.0) / args.num_iterations
-                lrnow = frac * args.learning_rate
-                optimizer.param_groups[0]["lr"] = lrnow
-
-            for step in range(0, args.num_steps):
-                global_step += args.num_envs
-                obs[step] = next_obs
-                dones[step] = next_done
-
-                # ALGO LOGIC: action logic
-                with torch.no_grad():
-                    action, logprob, _, value = self.get_action_and_value(next_obs)
-                    values[step] = value.flatten()
-                actions[step] = action
-                logprobs[step] = logprob
-
-                # TRY NOT TO MODIFY: execute the game and log data.
-                next_obs, reward, terminations, truncations, infos = self.step(action.cpu().numpy())
-                next_done = np.logical_or(terminations, truncations)
-                rewards[step] = torch.tensor(reward).to(device).view(-1)
-                next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
-
-                if "final_info" in infos:
-                    for info in infos["final_info"]:
-                        if info and "episode" in info:
-                            print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-
-            # bootstrap value if not done
-            with torch.no_grad():
-                next_value = self.get_value(next_obs).reshape(1, -1)
-                advantages = torch.zeros_like(rewards).to(device)
-                lastgaelam = 0
-                for t in reversed(range(args.num_steps)):
-                    if t == args.num_steps - 1:
-                        nextnonterminal = 1.0 - next_done
-                        nextvalues = next_value
-                    else:
-                        nextnonterminal = 1.0 - dones[t + 1]
-                        nextvalues = values[t + 1]
-                    delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
-                    advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
-                returns = advantages + values
-
-            # flatten the batch
-            b_obs = obs.reshape((-1,) + self.env.single_observation_space.shape)
-            b_logprobs = logprobs.reshape(-1)
-            b_actions = actions.reshape((-1,) + self.env.single_action_space.shape)
-            b_advantages = advantages.reshape(-1)
-            b_returns = returns.reshape(-1)
-            b_values = values.reshape(-1)
-
-            # Optimizing the policy and value network
-            b_inds = np.arange(args.batch_size)
-            clipfracs = []
-            for epoch in range(args.update_epochs):
-                np.random.shuffle(b_inds)
-                for start in range(0, args.batch_size, args.minibatch_size):
-                    end = start + args.minibatch_size
-                    mb_inds = b_inds[start:end]
-
-                    _, newlogprob, entropy, newvalue = self.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
-                    logratio = newlogprob - b_logprobs[mb_inds]
-                    ratio = logratio.exp()
-
-                    with torch.no_grad():
-                        # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                        old_approx_kl = (-logratio).mean()
-                        approx_kl = ((ratio - 1) - logratio).mean()
-                        clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
-
-                    mb_advantages = b_advantages[mb_inds]
-                    if args.norm_adv:
-                        mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
-
-                    # Policy loss
-                    pg_loss1 = -mb_advantages * ratio
-                    pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-                    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
-                    # Value loss
-                    newvalue = newvalue.view(-1)
-                    if args.clip_vloss:
-                        v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-                        v_clipped = b_values[mb_inds] + torch.clamp(
-                            newvalue - b_values[mb_inds],
-                            -args.clip_coef,
-                            args.clip_coef,
-                        )
-                        v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                        v_loss = 0.5 * v_loss_max.mean()
-                    else:
-                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
-
-                    entropy_loss = entropy.mean()
-                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
-
-                    optimizer.zero_grad()
-                    loss.backward()
-                    nn.utils.clip_grad_norm_(self.parameters(), args.max_grad_norm)
-                    optimizer.step()
-
-                if args.target_kl is not None and approx_kl > args.target_kl:
-                    break
-
-            y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
-            var_y = np.var(y_true)
-            explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-
-
-        self.env.close()
-
-@dataclass
-class Args:
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
-    """the name of this experiment"""
-    seed: int = 1
-    """seed of the experiment"""
-    torch_deterministic: bool = True
-    """if toggled, `torch.backends.cudnn.deterministic=False`"""
-    cuda: bool = True
-    """if toggled, cuda will be enabled by default"""
-    track: bool = False
-    """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "cleanRL"
-    """the wandb's project name"""
-    wandb_entity: str = None
-    """the entity (team) of wandb's project"""
-    capture_video: bool = False
-    """whether to capture videos of the agent performances (check out `videos` folder)"""
-
-    # Algorithm specific arguments
-    env_id: str = "CartPole-v1"
-    """the id of the environment"""
-    total_timesteps: int = 500000
-    """total timesteps of the experiments"""
-    learning_rate: float = 2.5e-4
-    """the learning rate of the optimizer"""
-    num_envs: int = 4
-    """the number of parallel game environments"""
-    num_steps: int = 128
-    """the number of steps to run in each environment per policy rollout"""
-    anneal_lr: bool = True
-    """Toggle learning rate annealing for policy and value networks"""
-    gamma: float = 0.99
-    """the discount factor gamma"""
-    gae_lambda: float = 0.95
-    """the lambda for the general advantage estimation"""
-    num_minibatches: int = 4
-    """the number of mini-batches"""
-    update_epochs: int = 4
-    """the K epochs to update the policy"""
-    norm_adv: bool = True
-    """Toggles advantages normalization"""
-    clip_coef: float = 0.2
-    """the surrogate clipping coefficient"""
-    clip_vloss: bool = True
-    """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
-    ent_coef: float = 0.01
-    """coefficient of the entropy"""
-    vf_coef: float = 0.5
-    """coefficient of the value function"""
-    max_grad_norm: float = 0.5
-    """the maximum norm for the gradient clipping"""
-    target_kl: float = None
-    """the target KL divergence threshold"""
-
-    # to be filled in runtime
-    batch_size: int = 0
-    """the batch size (computed in runtime)"""
-    minibatch_size: int = 0
-    """the mini-batch size (computed in runtime)"""
-    num_iterations: int = 0
-    """the number of iterations (computed in runtime)"""
+        # Concatenate all observations
+        obs = np.concatenate([
+            role_one_hot, agent_index_one_hot, beliefs, action_type_one_hot, leader, team, r_wins_progress, s_wins_progress, quest_num, turns_until_hammer
+        ])
+        
+        return obs

@@ -1,6 +1,9 @@
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
+from torch.nn.functional import softmax
+import torch
+
 from src.game.simulator import AvalonSimulator
 from src.game.game_state import AvalonGameState
 from src.game.utils import (
@@ -8,7 +11,7 @@ from src.game.utils import (
     QuestResult, RoundStage, GameStage,
 )
 from src.players.player import AvalonPlayer
-from typing import List, Callable, Tuple, Dict, Optional
+from typing import List, Callable, Tuple, Dict, Optional, Union
 from src.game.utils import Role
 from src.game.simulator import AvalonSimulator
 from src.players.random_player import RandomAvalonPlayer
@@ -47,10 +50,14 @@ class AvalonEnv(gym.Env):
         self.bot_player_factory = bot_player_factory
         self.randomize_player_assignments = randomize_player_assignments
         self.verbose = verbose
+        
+        # Define action and observation space
+        self.action_space = spaces.Box(low=0, high=1, shape=(5,), dtype=np.float64)
+        self.observation_space = spaces.Box(low=0, high=1, shape=(63,), dtype=np.float64)
 
         self.reset()
 
-    def reset(self) -> Tuple[AvalonGameState, Role, int]:
+    def reset(self, seed: Optional[int] = None, options = None) -> np.ndarray:
         """
         Reset the environment:
         - Reset the game state
@@ -58,9 +65,7 @@ class AvalonEnv(gym.Env):
         - Assign the agent to a random role and player index
         
         Returns
-        - game_state: The initial game state
-        - agent_role: The role of the agent
-        - agent_index: The index of the agent
+        - np.ndarray: The observation for the agent
         """
         
         # Compute player assignments
@@ -94,16 +99,21 @@ class AvalonEnv(gym.Env):
         if self._is_game_over():
             return self.reset()
                 
-        return deepcopy(self.game_state), self.agent_role, self.agent_index
+        info = {}
+        return self._get_obs(), info
 
-        
-    def step(self, action: List[int]):
+    def step(self, action: np.ndarray) -> np.ndarray:
         """
         The action method where the game dynamics are implemented
+        
+        returns: observation for the agent (np.ndarray)
         """
         
         # We must be in a state where the agent's action is required
         assert self._is_agent_action_required()
+        
+        # Action from numpy into the appropriate format (depending on game state)
+        action = self._parse_action(action)
         
         # Take the action
         if self.game_state.game_stage == GameStage.IN_PROGRESS:
@@ -122,6 +132,7 @@ class AvalonEnv(gym.Env):
         # Calculate reward, done, and any additional info
         reward = 0
         done = False
+        truncated = False
         info = {}
         if self.game_state.game_stage == GameStage.SPY_WIN:
             done = True
@@ -131,14 +142,117 @@ class AvalonEnv(gym.Env):
             done = True
             if self.player_assignments[self.agent_index] == Role.RESISTANCE or self.player_assignments[self.agent_index] == Role.MERLIN:
                 reward = 1.0
+                
+        if self._is_game_over():
+            obs = np.zeros(self.observation_space.shape)
+        else:
+            obs = self._get_obs()
               
+        return obs, reward, done, truncated, info
+    
+    def render(self, mode='human'):
+        """
+        Render the environment
+        """
+        pass
+    
+    ####################
+    # Parse the Action #
+    ####################
+    
+    def _parse_action(self, action: np.ndarray) -> Union[List[int], TeamVote, QuestVote]:
+        """
+        Parse the action from the agent, depending on the game state
+        action: np.ndarray of shape (5,)
+        """
         
-        return deepcopy(self.game_state), reward, done, info
+        assert self.game_state.game_stage == GameStage.IN_PROGRESS
+        assert action.shape == (5,)
+        
+        if self.game_state.round_stage == RoundStage.TEAM_PROPOSAL:
+            team_size = self.game_state.team_size
+            # get the top team_size indices
+            team_inds = action.argsort()[-team_size:][::-1]
+            return team_inds.tolist()
+        if self.game_state.round_stage == RoundStage.TEAM_VOTE:
+            # only use the first two indices
+            return TeamVote.APPROVE if action[0] > action[1] else TeamVote.REJECT
+        if self.game_state.round_stage == RoundStage.QUEST_VOTE:
+            # Good players cannot fail quests
+            if self.agent_role != Role.SPY:
+                return QuestVote.SUCCESS
+            
+            # only use the first two indices
+            return QuestVote.SUCCESS if action[0] > action[1] else QuestVote.FAIL
+        raise ValueError(f"Unknown round stage: {self.game_state.round_stage}")
+        
+    ###############
+    # Observation #
+    ###############
     
+    def _get_obs(self) -> np.ndarray:
+        """
+        Get the observation for the agent
+        """
+        
+        # Role as one hot
+        role_one_hot = np.zeros(3)
+        role_inds = {Role.MERLIN: 0, Role.RESISTANCE: 1, Role.SPY: 2}
+        role_one_hot[role_inds[self.agent_role]] = 1
+        
+        # Index of agent as one hot
+        agent_index_one_hot = np.zeros(5)
+        agent_index_one_hot[self.agent_index] = 1
+        
+        # Beliefs
+        beliefs = self.belief_model(self.game_state, self.agent_index).distribution
+        
+        # Action type as one hot
+        action_type_one_hot = np.zeros(3)
+        assert self.game_state.game_stage == GameStage.IN_PROGRESS, (
+            f"Unexpected game stage: {self.game_state.game_stage}"
+        )
+        if self.game_state.round_stage == RoundStage.TEAM_PROPOSAL:
+            action_type_one_hot[0] = 1
+        elif self.game_state.round_stage == RoundStage.TEAM_VOTE:
+            action_type_one_hot[1] = 1
+        elif self.game_state.round_stage == RoundStage.QUEST_VOTE:
+            action_type_one_hot[2] = 1
+
+        # Leader
+        leader = np.zeros(5)
+        leader[self.game_state.leader_index] = 1
+        
+        # Team
+        team = np.zeros(5)
+        if self.game_state.round_stage == RoundStage.TEAM_VOTE or self.game_state.round_stage == RoundStage.QUEST_VOTE:
+            team_inds = self.game_state.teams[-1]
+            team[team_inds] = 1
+
+        # Quest progress
+        r_wins_progress = np.array([np.count_nonzero(self.game_state.quest_results == QuestResult.SUCCEEDED) / 3])
+        s_wins_progress = np.array([np.count_nonzero(self.game_state.quest_results == QuestResult.FAILED) / 3])
+        
+        # Quest number
+        quest_num = np.zeros(5)
+        quest_num[self.game_state.quest_num] = 1
+
+        # Turns until hammer
+        turns_until_hammer = np.zeros(5)
+        for i in range(self.game_state.turns_until_hammer[0]):
+            turns_until_hammer[(self.game_state.leader_index + i) % 5] = i + 1
+        turns_until_hammer = softmax(torch.Tensor(turns_until_hammer), dim = 0).numpy()
+
+        # Concatenate all observations
+        obs = np.concatenate([
+            role_one_hot, agent_index_one_hot, beliefs, action_type_one_hot, leader, team, r_wins_progress, s_wins_progress, quest_num, turns_until_hammer
+        ])
+        
+        return obs
     
-    ############################
-    # Stepping the Environment #
-    ############################
+    ###############
+    # State Utils #
+    ###############
     
     def _is_game_over(self) -> bool:
         """
@@ -165,6 +279,36 @@ class AvalonEnv(gym.Env):
         if self.game_state.game_stage == GameStage.MERLIN_VOTE:
             return self._merlin_vote_requires_agent_action()
         raise ValueError(f"Unknown game stage: {self.game_state.game_stage}")
+    
+    def _team_proposal_requires_agent_action(self) -> bool:
+        """
+        Returns true if the agent's action is required
+        """
+        return self.game_state.leader_index == self.agent_index
+    
+    def _merlin_vote_requires_agent_action(self) -> bool:
+        """
+        Returns true if the agent's action is required
+        """
+        # We never need to query the model, we just read from the beliefs.
+        return False
+    
+    def _quest_vote_requires_agent_action(self) -> bool:
+        """
+        Returns true if the agent's action is required
+        """
+        quest_team = self.game_state.quest_teams[self.game_state.quest_num]
+        return self.agent_index in quest_team
+    
+    def _team_vote_requires_agent_action(self) -> bool:
+        """
+        Returns true if the agent's action is required
+        """
+        return self.agent_index in self.game_state.team_votes
+    
+    ############################
+    # Stepping the Environment #
+    ############################
     
     def _step_until_agent_action_required(self):
         """
@@ -193,12 +337,6 @@ class AvalonEnv(gym.Env):
             else:
                 raise ValueError(f"Unknown game stage: {self.game_state.game_stage}")
     
-    def _team_proposal_requires_agent_action(self) -> bool:
-        """
-        Returns true if the agent's action is required
-        """
-        return self.game_state.leader_index == self.agent_index
-
     def _team_proposal_step(self, action: Optional[List[int]]):
         """
         Run the team proposal step
@@ -212,16 +350,9 @@ class AvalonEnv(gym.Env):
             assert action is None
             leader = self.players[self.game_state.leader_index]
             team = leader.get_team_proposal(self.game_state)
-            self.game_state.propose_team(team)
-            
-
-    def _team_vote_requires_agent_action(self) -> bool:
-        """
-        Returns true if the agent's action is required
-        """
-        return self.agent_index in self.game_state.team_votes
-        
-    def _team_vote_step(self, action: Optional[List[int]]) -> None:
+            self.game_state.propose_team(team)        
+    
+    def _team_vote_step(self, action: Optional[TeamVote]) -> None:
         """
         Run the team vote step
         """
@@ -238,15 +369,8 @@ class AvalonEnv(gym.Env):
             else:
                 team_votes.append(action)
         self.game_state.vote_on_team(team_votes)
-    
-    def _quest_vote_requires_agent_action(self) -> bool:
-        """
-        Returns true if the agent's action is required
-        """
-        quest_team = self.game_state.quest_teams[self.game_state.quest_num]
-        return self.agent_index in quest_team
-        
-    def _quest_vote_step(self, action: Optional[List[int]]) -> None:
+            
+    def _quest_vote_step(self, action: Optional[QuestVote]) -> None:
         """
         Run the quest vote step
         """
@@ -268,17 +392,14 @@ class AvalonEnv(gym.Env):
             ]
         self.game_state.vote_on_quest(quest_votes)
     
-    def _merlin_vote_requires_agent_action(self) -> bool:
-        """
-        Returns true if the agent's action is required
-        """
-        # We never need to query the model, we just read from the beliefs.
-        return False
-    
     def _merlin_vote_step(self) -> None:
         """
         Run the merlin vote step
         """
+        
+        # We should never require the agent's action for the Merlin vote
+        assert not self._merlin_vote_requires_agent_action()
+        
         merlin_guesses = []
         
         # Non agent players
@@ -307,6 +428,10 @@ class AvalonEnv(gym.Env):
         role_assignment = belief.all_assignments[top_belief_ind]
         merlin_index = role_assignment.index(Role.MERLIN)
         return merlin_index
+        
+    ###########
+    # Cleanup #
+    ###########    
                 
     def close(self):
         """
