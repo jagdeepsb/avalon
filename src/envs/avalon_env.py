@@ -90,20 +90,22 @@ class AvalonEnv(gym.Env):
         """
         The action method where the game dynamics are implemented
         """
+        
+        did_use_agent_action = False
         if self.game_state.game_stage == GameStage.IN_PROGRESS:
             if self.game_state.round_stage == RoundStage.TEAM_PROPOSAL:
-                self._team_proposal_step(action)
+                did_use_agent_action = self._team_proposal_step(action)
             elif self.game_state.round_stage == RoundStage.TEAM_VOTE:
-                self._team_vote_step(action)
+                did_use_agent_action = self._team_vote_step(action)
             elif self.game_state.round_stage == RoundStage.QUEST_VOTE:
-                self._quest_vote_step(action)
+                did_use_agent_action = self._quest_vote_step(action)
         elif self.game_state.game_stage == GameStage.MERLIN_VOTE:
-            self._merlin_vote_step(action)
+            did_use_agent_action = self._merlin_vote_step(action)
 
         # Calculate reward, done, and any additional info
         reward = 0
         done = False
-        info = {}
+        info = {"did_use_agent_action": did_use_agent_action}
         if self.game_state.game_stage == GameStage.SPY_WIN:
             done = True
             if self.player_assignments[self.agent_index] == Role.SPY:
@@ -114,16 +116,24 @@ class AvalonEnv(gym.Env):
                 reward = 1.0
         return deepcopy(self.game_state), reward, done, info
 
-    def _team_proposal_step(self, action: List[int]) -> None:
+    def _team_proposal_step(self, action: List[int]) -> bool:
+        """
+        returns true if used the agent's action
+        """
         if self.game_state.leader_index != self.agent_index:
             leader = self.players[self.game_state.leader_index]
             team = leader.get_team_proposal(self.game_state)
             self.game_state.propose_team(team)
+            return False
         else:
             team = action
             self.game_state.propose_team(team)
+            return True
         
-    def _team_vote_step(self, action: List[int]) -> None:
+    def _team_vote_step(self, action: List[int]) -> bool:
+        """
+        returns true if used the agent's action
+        """
         team_votes = []
         for i in range(self.num_players):
             if i != self.agent_index:
@@ -131,8 +141,12 @@ class AvalonEnv(gym.Env):
             else:
                 team_votes.append(action)
         self.game_state.vote_on_team(team_votes)
+        return self.agent_index in self.game_state.team_votes
         
-    def _quest_vote_step(self, action: List[int]) -> None:
+    def _quest_vote_step(self, action: List[int]) -> bool:
+        """
+        returns true if used the agent's action
+        """
         quest_team = self.game_state.quest_teams[self.game_state.quest_num]
         quest_votes = []
         if self.agent_index not in quest_team:
@@ -144,18 +158,19 @@ class AvalonEnv(gym.Env):
                 self.players[i].get_quest_vote(self.game_state) if i != self.agent_index else action for i in quest_team
             ]
         self.game_state.vote_on_quest(quest_votes)
+        return self.agent_index in quest_team
     
-    def _merlin_vote_step(self, action) -> None:
-        if self.player_assignments[self.agent_index] != Role.SPY:
-            merlin_guesses = []
-            for i, player in self.players.items():
-                if player.role == Role.SPY:
+    def _merlin_vote_step(self, action) -> bool:
+        """
+        returns true if used the agent's action
+        """
+        merlin_guesses = []
+        for i, player in self.players.items():
+            if player.role == Role.SPY:
+                if i != self.agent_index:
                     merlin_guesses.append(player.guess_merlin(self.game_state))
-        else:
-            merlin_guesses = [action]
-            for i, player in self.players.items():
-                if player.role == Role.SPY:
-                    merlin_guesses.append(player.guess_merlin(self.game_state))
+                else:
+                    merlin_guesses.append(action)
         
         # All spies guess merlin. Take the majority vote, if tie, randomly choose between tied players
         player_idxs, counts = np.unique(merlin_guesses, return_counts=True)
@@ -163,6 +178,7 @@ class AvalonEnv(gym.Env):
         merlin_guess = np.random.choice(player_idxs[max_votes_mask])
         
         self.game_state.guess_merlin(merlin_guess)
+        return self.agent_role == Role.SPY
                 
     def close(self):
         """

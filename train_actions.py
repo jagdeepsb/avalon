@@ -26,6 +26,7 @@ from src.game.game_state import AvalonGameState
 from src.players.player import AvalonPlayer
 from src.game.arena import AvalonArena
 from src.belief_models.trivial import GroundTruthBeliefModel
+from src.game.utils import GameStage
 from copy import deepcopy
 
 def compute_returns(rewards, gamma=0.99):
@@ -163,18 +164,41 @@ if __name__ == "__main__":
         while not done:
             
             action, log_prob, value = ppo_player.get_action_probs_and_value(state)
-            next_state, reward, done, _ = env.step(action)
+            next_state, reward, done, info = env.step(action)
             
-            states.append(state)
-            actions.append(action)
-            player_roles.append(ppo_player_role)
-            player_indices.append(ppo_player_index)
-            rewards.append(reward)
-            log_probs_old.append(log_prob)
-            values.append(value)
-            masks.append(1 - int(done))
+            if info["did_use_agent_action"]:
+                # Only train on actions taken by the PPO agent
+                states.append(state)
+                actions.append(action)
+                player_roles.append(ppo_player_role)
+                player_indices.append(ppo_player_index)
+                rewards.append(reward)
+                log_probs_old.append(log_prob)
+                values.append(value)
+                masks.append(1 - int(done))
 
             state = next_state
+            
+        # HACK to handle the fact that the env doesn't always return the final reward
+        final_reward = 0.0
+        if env.game_state.game_stage == GameStage.SPY_WIN and ppo_player_role == Role.SPY:
+            final_reward = 1.0
+        elif env.game_state.game_stage == GameStage.RESISTANCE_WIN and (ppo_player_role == Role.RESISTANCE or ppo_player_role == Role.MERLIN):
+            final_reward = 1.0
+        rewards = [final_reward] * len(rewards)
+            
+        # Agent didn't take any actions this episode
+        if len(states) == 0:
+            continue
+        
+        # states: List[AvalonGameState]
+        # for state, action, player_role, player_idx, reward in zip(states, actions, player_roles, player_indices, rewards):
+        #     print(f"Agent is {player_role} at index {player_idx}")
+        #     print(f"State: {state.get_game_state_as_str}")
+        #     print(f"Action: {action}, Reward: {reward}")
+        #     print()
+        # print(env.game_state.get_game_state_as_str)
+        # assert False
 
         log_probs_old = torch.stack(log_probs_old)
         next_value = ppo_player.get_value(next_state)
