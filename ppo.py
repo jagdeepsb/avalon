@@ -169,6 +169,7 @@ if __name__ == "__main__":
             'belief_model': belief_model,
             'bot_player_factory': bot_player_factory,
             'randomize_player_assignments': True,
+            'player_role': None,
             # 'verbose': True
         }
     )
@@ -176,5 +177,5 @@ if __name__ == "__main__":
     callback = CustomCallback()
     
     model = PPO("MlpPolicy", vec_env, verbose=1)
-    model.learn(total_timesteps=100000, callback=callback)
+    model.learn(total_timesteps=1000000, callback=callback)
     model.save("ppo_avalon")

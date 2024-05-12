@@ -136,7 +136,16 @@ class PPOAvalonPlayer(AvalonPlayer):
 
         # Concatenate all observations
         obs = np.concatenate([
-            role_one_hot, agent_index_one_hot, beliefs, action_type_one_hot, leader, team, r_wins_progress, s_wins_progress, quest_num, turns_until_hammer
+            role_one_hot,
+            agent_index_one_hot,
+            beliefs,
+            action_type_one_hot,
+            leader,
+            team,
+            r_wins_progress,
+            s_wins_progress,
+            quest_num,
+            turns_until_hammer
         ])
         
         return obs

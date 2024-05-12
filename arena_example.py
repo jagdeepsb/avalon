@@ -17,17 +17,19 @@ roles = [
 
 arena = AvalonArena(
     roles=roles,
-    player_factory_1=random_player_factory,
+    player_factory_1=stupid_hardcoded_player_factory,
     player_factory_2=random_player_factory,
-    num_games=100,
+    num_games=10000,
     exactly_n_strategy_1=1,
 )
 
-for win_rates, label in zip(arena.get_win_rates_by_role(), ["Random 1", "Random 2"]):
+strategy_names = ["Stupid", "Random"]
+
+for win_rates, label in zip(arena.get_win_rates_by_role(), strategy_names):
     print(f"{label} win rates:")
     for role, win_rate in win_rates.items():
         print(f"{role}: {win_rate}")
     print()
     
-for win_rate, label in zip(arena.get_overall_win_rates(), ["Random 1", "Random 2"]):
+for win_rate, label in zip(arena.get_overall_win_rates(), strategy_names):
     print(f"{label} win rate: {win_rate}")

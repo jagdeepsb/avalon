@@ -39,6 +39,7 @@ class GroundTruthBeliefModel(BeliefModel):
         
         # No noise for now
         weight = 1.0
+        
         probs = weight*probs + (1-weight)*np.random.normal(0, 0.20, len(probs))
         probs = probs / probs.sum()
         

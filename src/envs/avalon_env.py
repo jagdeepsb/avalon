@@ -30,6 +30,7 @@ class AvalonEnv(gym.Env):
         belief_model: BeliefModel,
         bot_player_factory: Callable[[Role, int], AvalonPlayer],
         randomize_player_assignments=True,
+        player_role: Optional[Role] = None,
         verbose=False
     ):
         """
@@ -49,11 +50,13 @@ class AvalonEnv(gym.Env):
         self.belief_model = belief_model
         self.bot_player_factory = bot_player_factory
         self.randomize_player_assignments = randomize_player_assignments
+        self._forced_player_role = player_role
         self.verbose = verbose
         
         # Define action and observation space
         self.action_space = spaces.Box(low=0, high=1, shape=(5,), dtype=np.float64)
         self.observation_space = spaces.Box(low=0, high=1, shape=(63,), dtype=np.float64)
+        # self.observation_space = spaces.Box(low=0, high=1, shape=(13,), dtype=np.float64)
 
         self.reset()
 
@@ -76,6 +79,10 @@ class AvalonEnv(gym.Env):
         # Assign agent role and index
         self.agent_index = np.random.choice(len(player_assignments))
         self.agent_role = player_assignments[self.agent_index]
+        if self._forced_player_role is not None:
+            while self.agent_role != self._forced_player_role:
+                self.agent_index = np.random.choice(len(player_assignments))
+                self.agent_role = player_assignments[self.agent_index]
                 
         # Create simulator
         self.player_assignments = player_assignments
@@ -245,7 +252,16 @@ class AvalonEnv(gym.Env):
 
         # Concatenate all observations
         obs = np.concatenate([
-            role_one_hot, agent_index_one_hot, beliefs, action_type_one_hot, leader, team, r_wins_progress, s_wins_progress, quest_num, turns_until_hammer
+            role_one_hot,
+            agent_index_one_hot,
+            beliefs,
+            action_type_one_hot,
+            leader,
+            team,
+            r_wins_progress,
+            s_wins_progress,
+            quest_num,
+            turns_until_hammer
         ])
         
         return obs
