@@ -165,12 +165,16 @@ class AvalonEnv(gym.Env):
         returns true if used the agent's action
         """
         merlin_guesses = []
+        
+        # Non agent players
         for i, player in self.players.items():
             if player.role == Role.SPY:
-                if i != self.agent_index:
                     merlin_guesses.append(player.guess_merlin(self.game_state))
-                else:
-                    merlin_guesses.append(action)
+        
+        # Agent player
+        if self.agent_role == Role.SPY:
+            merlin_guesses.append(action)
+                    
         
         # All spies guess merlin. Take the majority vote, if tie, randomly choose between tied players
         player_idxs, counts = np.unique(merlin_guesses, return_counts=True)

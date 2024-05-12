@@ -169,8 +169,8 @@ class ActorCriticModel(nn.Module):
         if obs.game_stage == GameStage.MERLIN_VOTE:
             # top_belief_ind = torch.argmax(obs_in)
             
-            beliefs = self.belief_model(obs, index).distribution
-            beliefs = torch.tensor(beliefs)
+            belief = self.belief_model(obs, index)
+            beliefs = torch.tensor(belief.distribution)
             top_belief_ind = torch.argmax(beliefs)
             
             # Problem spec
