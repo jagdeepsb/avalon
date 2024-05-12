@@ -85,27 +85,33 @@ class AvalonEnv(gym.Env):
                 self.players[i] = self.bot_player_factory(role, i)
                 
         return deepcopy(self.game_state), self.agent_role, self.agent_index
+    
+    def _step_until_agent_action_required(self):
+        """
+        Step until the agent's action is required
+        """
+        
         
     def step(self, action: List[int]):
         """
         The action method where the game dynamics are implemented
         """
         
-        did_use_agent_action = False
+        require_agent_action = False
         if self.game_state.game_stage == GameStage.IN_PROGRESS:
             if self.game_state.round_stage == RoundStage.TEAM_PROPOSAL:
-                did_use_agent_action = self._team_proposal_step(action)
+                require_agent_action = self._team_proposal_step(action)
             elif self.game_state.round_stage == RoundStage.TEAM_VOTE:
-                did_use_agent_action = self._team_vote_step(action)
+                require_agent_action = self._team_vote_step(action)
             elif self.game_state.round_stage == RoundStage.QUEST_VOTE:
-                did_use_agent_action = self._quest_vote_step(action)
+                require_agent_action = self._quest_vote_step(action)
         elif self.game_state.game_stage == GameStage.MERLIN_VOTE:
-            did_use_agent_action = self._merlin_vote_step(action)
+            require_agent_action = self._merlin_vote_step(action)
 
         # Calculate reward, done, and any additional info
         reward = 0
         done = False
-        info = {"did_use_agent_action": did_use_agent_action}
+        info = {"did_use_agent_action": require_agent_action}
         if self.game_state.game_stage == GameStage.SPY_WIN:
             done = True
             if self.player_assignments[self.agent_index] == Role.SPY:
@@ -115,6 +121,12 @@ class AvalonEnv(gym.Env):
             if self.player_assignments[self.agent_index] == Role.RESISTANCE or self.player_assignments[self.agent_index] == Role.MERLIN:
                 reward = 1.0
         return deepcopy(self.game_state), reward, done, info
+    
+    def _team_proposal_requires_agent_action(self) -> bool:
+        """
+        Returns true if the agent's action is required
+        """
+        return self.game_state.leader_index == self.agent_index
 
     def _team_proposal_step(self, action: List[int]) -> bool:
         """
@@ -130,6 +142,12 @@ class AvalonEnv(gym.Env):
             self.game_state.propose_team(team)
             return True
         
+    def _team_vote_requires_agent_action(self) -> bool:
+        """
+        Returns true if the agent's action is required
+        """
+        return self.agent_index in self.game_state.team_votes
+        
     def _team_vote_step(self, action: List[int]) -> bool:
         """
         returns true if used the agent's action
@@ -142,6 +160,13 @@ class AvalonEnv(gym.Env):
                 team_votes.append(action)
         self.game_state.vote_on_team(team_votes)
         return self.agent_index in self.game_state.team_votes
+    
+    def _quest_vote_requires_agent_action(self) -> bool:
+        """
+        Returns true if the agent's action is required
+        """
+        quest_team = self.game_state.quest_teams[self.game_state.quest_num]
+        return self.agent_index in quest_team
         
     def _quest_vote_step(self, action: List[int]) -> bool:
         """
